@@ -21,18 +21,38 @@ def _field_text(record: dict[str, Any], *names: str) -> str:
     return str(value or "").strip().lower()
 
 
+def _normalized_key(key: object) -> str:
+    return "".join(ch for ch in str(key).strip().lower() if ch.isalnum())
+
+
 def _is_normal(record: dict[str, Any]) -> bool:
-    value = record_type(record)
-    if value in {"normal", "normal change", "normal-change"}:
+    value = record_type(record).replace("_", " ").replace("-", " ").strip()
+    if value in {"normal", "normal change"}:
         return True
-    # Handle exports that spell the field differently, e.g. change_type_display.
     for key, raw in record.items():
-        key_text = str(key).strip().lower().replace("_", " ")
-        if "type" in key_text or "change class" in key_text or "change category" in key_text:
-            normalized = str(raw or "").strip().lower()
-            if normalized in {"normal", "normal change", "normal-change"}:
+        key_text = _normalized_key(key)
+        if any(token in key_text for token in ("changetype", "type", "changeclass", "changeclassification")):
+            normalized = str(raw or "").strip().lower().replace("_", " ").replace("-", " ")
+            if normalized in {"normal", "normal change"} or "normal change" in normalized:
                 return True
     return False
+
+
+def _outcome_text(record: dict[str, Any]) -> str:
+    direct = _field_text(
+        record,
+        "CAB Outcome", "CAB recommendation", "CAB Recommendation", "cab_outcome", "cab_recommendation",
+        "CAB Decision", "CAB Status", "Final CAB Decision", "Final CAB Outcome",
+    )
+    if direct:
+        return direct
+    for key, raw in record.items():
+        key_text = _normalized_key(key)
+        if "cab" in key_text and any(token in key_text for token in ("outcome", "recommendation", "decision", "status", "result")):
+            text = str(raw or "").strip().lower()
+            if text:
+                return text
+    return ""
 
 
 def normalize_outcome(record: dict[str, Any]) -> Decision | None:
@@ -40,7 +60,7 @@ def normalize_outcome(record: dict[str, Any]) -> Decision | None:
 
     Ambiguous operational notes remain unscored instead of being guessed.
     """
-    raw = _field_text(record, "CAB Outcome", "CAB recommendation", "CAB Recommendation", "cab_outcome", "cab_recommendation")
+    raw = _outcome_text(record)
     if not raw:
         return None
     if any(term in raw for term in (
@@ -65,10 +85,10 @@ def prepare_normal_benchmark(records: Iterable[dict[str, Any]]) -> list[Benchmar
             continue
         actual = normalize_outcome(original)
         hidden = strip_post_decision_fields(dict(original))
-        for key in (
-            "CAB Outcome", "CAB recommendation", "CAB Recommendation",
-            "cab_outcome", "cab_recommendation", "historical_prediction_label",
-        ):
-            hidden.pop(key, None)
+        for key in list(hidden):
+            key_text = _normalized_key(key)
+            if "cab" in key_text and any(token in key_text for token in ("outcome", "recommendation", "decision", "status", "result")):
+                hidden.pop(key, None)
+        hidden.pop("historical_prediction_label", None)
         examples.append(BenchmarkExample(hidden, actual, source_id(original)))
     return examples
