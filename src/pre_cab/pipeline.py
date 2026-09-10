@@ -42,7 +42,7 @@ def run_pre_cab(
 
     Free-tier behavior intentionally avoids a Stage-1 model call. Deterministic specialists first
     decide whether the CR can progress to document verification; GPT-OSS is reserved for the final
-    high-value reasoning pass after evidence and historical memory are available.
+    high-value reasoning pass after ranked attachment excerpts and historical memory are available.
     """
     stage1_result = run_stage1(cr, strictness=strictness, model=None, memory=memory)
     collected = list(documents or [])
@@ -83,6 +83,7 @@ def run_pre_cab(
         strictness=strictness,
         model=model,
         memory=memory,
+        documents=deduped,
     )
     final_decision, model_finding = reconcile_final_decision(deterministic_final, reasoning)
     if model_finding is not None:
