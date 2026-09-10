@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from .benchmark_leakage import strip_post_decision_fields
 from .input_loader import first_value, record_type, source_id
@@ -38,14 +38,57 @@ def _is_normal(record: dict[str, Any]) -> bool:
             candidates.append(str(raw or ""))
     for candidate in candidates:
         normalized = _normalize_type(candidate)
-        if normalized in {"normal", "normal change", "normalchange"}:
-            return True
-        if "normal change" in normalized:
+        if normalized in {"normal", "normal change", "normalchange"} or "normal change" in normalized:
             return True
     return False
 
 
-def _outcome_text(record: dict[str, Any]) -> str:
+_DECISION_TERMS: tuple[str, ...] = (
+    "approved", "approve", "approvd", "conditionally approved", "conditional", "rejected",
+    "reject", "not approved", "not ready", "hold", "held", "pending approval", "cancelled",
+    "canceled", "cancellation", "go ahead", "okay to proceed", "test results reqd",
+    "schedule needs to be updated",
+)
+
+
+def _looks_like_outcome_field(key: object) -> bool:
+    normalized = _normalized_key(key)
+    return any(token in normalized for token in (
+        "cab", "outcome", "recommendation", "decision", "approval", "review", "result",
+        "disposition", "action", "comment", "remark", "note",
+    ))
+
+
+def discover_outcome_fields(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rank likely historical decision fields by field name and decision vocabulary."""
+    normal_rows = [row for row in records if _is_normal(row)]
+    fields: list[dict[str, Any]] = []
+    keys = sorted({str(key) for row in normal_rows for key in row if _looks_like_outcome_field(key)})
+    for key in keys:
+        values = [str(row.get(key) or "").strip() for row in normal_rows]
+        nonempty = [value for value in values if value]
+        decision_hits = sum(any(term in value.lower() for term in _DECISION_TERMS) for value in nonempty)
+        key_text = _normalized_key(key)
+        name_score = sum(token in key_text for token in ("cab", "outcome", "recommendation", "decision", "disposition"))
+        score = (decision_hits / len(nonempty) if nonempty else 0.0) * 100 + name_score * 10
+        if nonempty and decision_hits:
+            fields.append({
+                "field": key,
+                "nonempty": len(nonempty),
+                "decision_hits": decision_hits,
+                "decision_rate": round(decision_hits / len(nonempty), 4),
+                "score": round(score, 2),
+                "sample_values": list(dict.fromkeys(nonempty))[:10],
+            })
+    fields.sort(key=lambda item: (item["score"], item["decision_rate"], item["nonempty"]), reverse=True)
+    return fields
+
+
+def _outcome_field(record: dict[str, Any], preferred_field: str | None = None) -> str:
+    if preferred_field:
+        for key, value in record.items():
+            if str(key) == preferred_field:
+                return str(value or "").strip().lower()
     direct = _field_text(
         record,
         "CAB Outcome", "CAB recommendation", "CAB Recommendation", "cab_outcome", "cab_recommendation",
@@ -54,27 +97,19 @@ def _outcome_text(record: dict[str, Any]) -> str:
     )
     if direct:
         return direct
-    for key, raw in record.items():
-        key_text = _normalized_key(key)
-        if "cab" in key_text and any(token in key_text for token in ("outcome", "recommendation", "decision", "status", "result", "comment")):
-            text = str(raw or "").strip().lower()
-            if text:
-                return text
-    return ""
+    candidates = discover_outcome_fields([record])
+    return str(record.get(candidates[0]["field"]) or "").strip().lower() if candidates else ""
 
 
-def normalize_outcome(record: dict[str, Any]) -> Decision | None:
-    """Map explicit historical CAB text to a three-way benchmark label.
-
-    Ambiguous operational notes remain unscored instead of being guessed.
-    """
-    raw = _outcome_text(record)
+def normalize_outcome(record: dict[str, Any], preferred_field: str | None = None) -> Decision | None:
+    """Map explicit historical decision text to a three-way benchmark label."""
+    raw = _outcome_field(record, preferred_field)
     if not raw:
         return None
     if any(term in raw for term in (
-        "cancellation requested", "request for cancellation", "cancelled as",
-        "cancelled", "canceled", "cancel", "rejected", "reject", "insufficient information",
-        "not ready", "not approved", "hold", "held", "do not approve", "don't approve",
+        "cancellation requested", "request for cancellation", "cancelled as", "cancelled", "canceled",
+        "cancel", "rejected", "reject", "insufficient information", "not ready", "not approved",
+        "hold", "held", "do not approve", "don't approve",
     )):
         return Decision.NOT_READY
     if any(term in raw for term in (
@@ -90,16 +125,16 @@ def normalize_outcome(record: dict[str, Any]) -> Decision | None:
     return None
 
 
-def prepare_normal_benchmark(records: Iterable[dict[str, Any]]) -> list[BenchmarkExample]:
+def prepare_normal_benchmark(records: Iterable[dict[str, Any]], preferred_outcome_field: str | None = None) -> list[BenchmarkExample]:
+    rows = list(records)
     examples: list[BenchmarkExample] = []
-    for original in records:
+    for original in rows:
         if not _is_normal(original):
             continue
-        actual = normalize_outcome(original)
+        actual = normalize_outcome(original, preferred_outcome_field)
         hidden = strip_post_decision_fields(dict(original))
         for key in list(hidden):
-            key_text = _normalized_key(key)
-            if "cab" in key_text and any(token in key_text for token in ("outcome", "recommendation", "decision", "status", "result", "comment")):
+            if _looks_like_outcome_field(key):
                 hidden.pop(key, None)
         hidden.pop("historical_prediction_label", None)
         examples.append(BenchmarkExample(hidden, actual, source_id(original)))
@@ -109,12 +144,16 @@ def prepare_normal_benchmark(records: Iterable[dict[str, Any]]) -> list[Benchmar
 def benchmark_diagnostics(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     rows = list(records)
     normal_rows = [row for row in rows if _is_normal(row)]
-    outcomes = Counter(_outcome_text(row) for row in normal_rows if _outcome_text(row))
+    candidates = discover_outcome_fields(rows)
+    preferred = candidates[0]["field"] if candidates else None
+    outcomes = Counter(_outcome_field(row, preferred) for row in normal_rows if _outcome_field(row, preferred))
     return {
         "total_records": len(rows),
         "normal_records": len(normal_rows),
-        "records_with_outcome_text": sum(bool(_outcome_text(row)) for row in normal_rows),
-        "scorable_records": sum(normalize_outcome(row) is not None for row in normal_rows),
-        "unscorable_records": sum(normalize_outcome(row) is None for row in normal_rows),
+        "candidate_outcome_fields": candidates[:10],
+        "selected_outcome_field": preferred,
+        "records_with_outcome_text": sum(bool(_outcome_field(row, preferred)) for row in normal_rows),
+        "scorable_records": sum(normalize_outcome(row, preferred) is not None for row in normal_rows),
+        "unscorable_records": sum(normalize_outcome(row, preferred) is None for row in normal_rows),
         "candidate_outcome_values": dict(outcomes.most_common(20)),
     }
