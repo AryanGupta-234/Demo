@@ -26,6 +26,10 @@ _DECISION_RANK = {
     Decision.CONDITIONAL: 1,
     Decision.NOT_READY: 2,
 }
+_REQUIRED_BRAIN_KEYS = {
+    "prediction", "confidence", "facts", "inferences", "uncertainties", "contradictions",
+    "technical_reasoning", "cab_reasoning", "cab_questions", "recommendations", "self_critique",
+}
 
 
 def _parse_brain_payload(text: str) -> dict[str, Any] | None:
@@ -33,13 +37,14 @@ def _parse_brain_payload(text: str) -> dict[str, Any] | None:
         payload = json.loads(text)
     except Exception:
         return None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict) or not _REQUIRED_BRAIN_KEYS.issubset(payload):
+        return None
+    return payload
 
 
 def _brain_decision(reasoning: ReasoningLoopResult | None) -> tuple[Decision | None, dict[str, Any] | None]:
     if reasoning is None:
         return None, None
-    # In dual mode, the independent critique is the final model recommendation.
     response = reasoning.critique or reasoning.initial
     payload = _parse_brain_payload(response.text)
     if not payload:
@@ -65,9 +70,9 @@ def run_stage1(
 ) -> PipelineResult:
     """Run deterministic validation, specialist agents, retrieval and optional GPT-OSS reasoning.
 
-    The reasoning model may make the result more conservative, but it can never override a
-    deterministic blocker and upgrade the decision. This preserves agentic prediction while keeping
-    governance-critical gates auditable.
+    GPT-OSS may make the result more conservative but can never upgrade a deterministic blocker.
+    Provider failures and malformed model output degrade to CONDITIONAL rather than crashing or
+    silently passing the CR.
     """
     stage1 = validate_fields(cr, strictness)
     context = AgentContext(cr=cr, strictness=strictness)
@@ -86,12 +91,40 @@ def run_stage1(
     deterministic_decision = Decision.NOT_READY if blocking else (Decision.CONDITIONAL if warnings else Decision.PASS)
 
     reasoning: ReasoningLoopResult | None = None
+    model_error: str | None = None
     if model is not None:
-        brain = AgenticReasoningLoop(model=model, memory=memory)
-        reasoning = brain.run(context, findings=merged)
+        try:
+            brain = AgenticReasoningLoop(model=model, memory=memory)
+            reasoning = brain.run(context, findings=merged)
+        except Exception as exc:
+            model_error = f"{type(exc).__name__}: {exc}"
 
     model_decision, brain_payload = _brain_decision(reasoning)
     decision = _more_conservative(deterministic_decision, model_decision)
+
+    if model is not None and model_error is not None:
+        merged.append(
+            Finding(
+                code="MODEL_UNAVAILABLE",
+                title="AI reasoning analysis is incomplete",
+                severity=FindingSeverity.WARNING,
+                message="Deterministic validation completed, but GPT-OSS reasoning could not be completed.",
+                technical_detail=model_error,
+                recommendation="Retry the reasoning provider or complete human review before treating the CR as fully ready.",
+            )
+        )
+        decision = _more_conservative(decision, Decision.CONDITIONAL)
+    elif model is not None and reasoning is not None and brain_payload is None:
+        merged.append(
+            Finding(
+                code="MODEL_OUTPUT_INVALID",
+                title="AI reasoning output could not be validated",
+                severity=FindingSeverity.WARNING,
+                message="GPT-OSS responded, but its output did not satisfy the required structured decision contract.",
+                recommendation="Retry the reasoning pass or complete human review.",
+            )
+        )
+        decision = _more_conservative(decision, Decision.CONDITIONAL)
 
     if model_decision is not None and _DECISION_RANK[model_decision] > _DECISION_RANK[deterministic_decision]:
         reason_text = "GPT-OSS identified additional risk not represented by the deterministic gates."
@@ -119,7 +152,6 @@ def run_stage1(
     if brain_payload:
         confidence = brain_payload.get("confidence")
         if isinstance(confidence, (int, float)):
-            # Keep confidence conservative by never exceeding either source's confidence.
             stage1.confidence = min(stage1.confidence, max(0.0, min(1.0, float(confidence))))
         stage1.technical_summary = str(brain_payload.get("technical_reasoning") or stage1.technical_summary)
         stage1.cab_summary = str(brain_payload.get("cab_reasoning") or stage1.cab_summary)
@@ -133,6 +165,7 @@ def run_stage1(
             "reasoning_passes": (2 if reasoning and reasoning.critique is not None else (1 if reasoning else 0)),
             "model": getattr(model, "model_name", None),
             "model_prediction": model_decision.value if model_decision else None,
+            "model_error": model_error,
             "deterministic_prediction": deterministic_decision.value,
             "memory_records_retrieved": len(reasoning.retrieved_memory) if reasoning else 0,
             "brain": brain_payload or {},
