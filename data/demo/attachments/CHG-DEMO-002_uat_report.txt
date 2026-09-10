@@ -1,0 +1,10 @@
+CR: CHG-DEMO-002
+Environment: UAT
+Test case: ATM transaction fee recovery
+Expected result: Fee recovery succeeds and transaction completes.
+Actual result: Fee recovery succeeded in all executed scenarios.
+Status: PASS
+Test cases executed: 12
+Passed: 12
+Failed: 0
+UAT signoff: Completed
