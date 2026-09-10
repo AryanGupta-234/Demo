@@ -6,28 +6,33 @@ from pre_cab.models import GroqGPTOSS120B
 from pre_cab.schemas import Strictness, Decision
 from pre_cab.orchestrator import run_stage1
 
+OUTCOME_FIELDS = {
+    "CAB Outcome", "CAB recommendation", "CAB Recommendation", "Close code", "Close notes",
+    "Closed", "Closed by", "Approval history", "Actual start date", "Actual end date",
+}
 
-def stratified(records, limit, seed=7):
+def model_visible(row: dict) -> dict:
+    return {k: v for k, v in row.items() if k not in OUTCOME_FIELDS and not str(k).startswith("historical_")}
+
+def stratified(records: list[dict], limit: int, seed: int = 7) -> list[dict]:
     buckets = {d: [] for d in Decision}
-    unknown = []
     for row in records:
         label = normalize_cab_recommendation(row.get("CAB recommendation"))
-        (buckets[label] if label else unknown).append(row)
+        if label is not None:
+            buckets[label].append(row)
     rng = random.Random(seed)
-    selected = []
-    usable = [b for b in buckets.values() if b]
-    while len(selected) < min(limit, sum(map(len, usable))) and usable:
-        for bucket in usable:
+    selected: list[dict] = []
+    while len(selected) < min(limit, sum(len(b) for b in buckets.values())):
+        progressed = False
+        for bucket in buckets.values():
             if bucket and len(selected) < limit:
                 selected.append(bucket.pop(rng.randrange(len(bucket))))
+                progressed = True
+        if not progressed:
+            break
     return selected
 
-
-def heuristic_predict(cr, strictness):
-    return run_stage1(cr, strictness=strictness).stage1.decision
-
-
-def main():
+def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("input", type=Path)
     p.add_argument("--limit", type=int, default=50)
@@ -42,10 +47,10 @@ def main():
         actual = normalize_cab_recommendation(row.get("CAB recommendation"))
         if actual is None:
             continue
-        predicted = run_stage1(row, strictness=Strictness(args.strictness), model=model).stage1.decision
+        predicted = run_stage1(model_visible(row), strictness=Strictness(args.strictness), model=model).stage1.decision
         summary["scored"] += 1
-        summary["correct"] += predicted == actual
-        summary["false_pass"] += predicted == Decision.PASS and actual != Decision.PASS
+        summary["correct"] += int(predicted == actual)
+        summary["false_pass"] += int(predicted == Decision.PASS and actual != Decision.PASS)
     summary["accuracy"] = summary["correct"] / summary["scored"] if summary["scored"] else 0.0
     summary["false_pass_rate"] = summary["false_pass"] / summary["scored"] if summary["scored"] else 0.0
     print(json.dumps(summary, indent=2))
