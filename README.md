@@ -15,6 +15,40 @@ Model-independent proof of concept for validating **Normal** ServiceNow Change R
 - Attachment analysis is a second-stage gate: claims in the CR are checked against supporting documents.
 - Final decisions are `PASS`, `CONDITIONAL`, or `NOT_READY`; the LLM provides reasoning, while deterministic policy gates protect critical approval logic.
 
+## Ingestion boundary
+
+The validator does **not** own the ServiceNow bulk-fetch or attachment-download workflow. The first integration layer is expected to fetch the CRs from ServiceNow and create the local CR workspace. Your existing API/file-management script can be used as that upstream input layer.
+
+The contract is intentionally simple:
+
+```text
+ServiceNow API / fetcher
+        ↓
+fetch CR metadata + all attachments
+        ↓
+file-management layer
+        ↓
+private CR workspace
+        ├── CR001234/
+        │   ├── attachment-a.pdf
+        │   ├── test-results.xlsx
+        │   └── approval.pdf
+        ├── CR001235/
+        │   ├── uat.pdf
+        │   └── rollback.pdf
+        └── ...
+        ↓
+Pre-CAB Validator
+        ↓
+validation outputs
+```
+
+The validator treats each `<CR number>/` directory as the authoritative attachment boundary for that CR. It reads the files inside that directory and converts supported attachments into normalized evidence documents. It does not call ServiceNow, move/delete downloaded files, or inspect sibling CR folders. The upstream fetcher and file manager can therefore evolve independently of the validation algorithm.
+
+For the current phase, manually placing PDFs/files into the same CR-specific directory structure is also supported. This is useful for testing the validator before the upstream ServiceNow fetcher is attached.
+
+Sensitive production CR exports and downloaded attachments must remain in the controlled local environment and must **not** be committed to this public repository.
+
 ## Design principles
 
 1. Technical detail is preserved. CAB reviewers get a clear summary plus expandable technical findings.
@@ -67,11 +101,23 @@ python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balan
 python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --llm --provider auto
 ```
 
-If local attachment evidence is available, include it without copying the evidence into Git:
+If the upstream ServiceNow fetcher/file manager has produced one private directory per CR, point the validator at the **parent directory**:
 
 ```text
-python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --attachment-root real_data/attachments
-python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --attachment-root real_data/attachments --llm --provider auto
+python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --attachment-root real_data/cr_workspace
+python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --attachment-root real_data/cr_workspace --llm --provider auto
+```
+
+Expected layout:
+
+```text
+real_data/cr_workspace/
+├── CR001234/
+│   ├── approval.pdf
+│   └── test-results.pdf
+├── CR001235/
+│   └── uat.xlsx
+└── ...
 ```
 
 Use `--stage1-only` when you specifically want to isolate Stage 1. The end-to-end harness records the pipeline mode in the manifest so Stage-1-only and full-pipeline results are not confused.
@@ -85,7 +131,7 @@ python scripts/run_ablation.py real_data/cr_export.json --limit 50 --seed 7 --st
 python scripts/run_ablation.py real_data/cr_export.json --limit 50 --seed 7 --strictness balanced --llm --provider auto
 ```
 
-If private attachment evidence is available locally, add `--attachment-root <private-folder>`; attachment contents remain local.
+If private attachment evidence is available locally, add `--attachment-root <private-cr-workspace>`; attachment contents remain local.
 
 ## Current API
 
@@ -122,6 +168,7 @@ The validation endpoint accepts the CR plus extracted attachment records. The re
 - CI/test scaffolding.
 - Benchmark dataset fingerprints, manifests and layer-ablation tooling.
 - Reviewed requirement-level evaluation framework with per-label precision/recall/F1 and reviewer feedback/episodic-memory path.
+- Explicit private CR-workspace handoff: the validator consumes one CR directory's downloaded attachments without owning upstream ServiceNow file management.
 
 ## Capability benchmark sequence
 
@@ -144,6 +191,10 @@ The real-data execution itself should happen in the user's controlled environmen
 The intended V1 operating pattern is:
 
 ```text
+ServiceNow fetcher / file manager
+      ↓
+Private CR workspace
+      ↓
 Local preprocessing
       ↓
 Local retrieval + memory
