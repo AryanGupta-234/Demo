@@ -1,16 +1,17 @@
 """Local attachment discovery for offline/private benchmark and demo runs.
 
-Files remain on the caller's machine. This module discovers likely attachments for a CR and converts
-supported formats into EvidenceDocument records consumed by Stage 2.
+Files remain on the caller's machine. Supported text/tabular documents are extracted locally. Image
+attachments are retained as explicit unparsed evidence so the validator never silently ignores them.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
 
 from .evidence import EvidenceDocument
 
-SUPPORTED_SUFFIXES = {".pdf", ".xlsx", ".xlsm", ".txt", ".md", ".csv", ".eml", ".json"}
+TEXT_SUFFIXES = {".pdf", ".xlsx", ".xlsm", ".txt", ".md", ".csv", ".eml", ".json"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+SUPPORTED_SUFFIXES = TEXT_SUFFIXES | IMAGE_SUFFIXES
 
 
 def _read_pdf(path: Path) -> str:
@@ -50,11 +51,7 @@ def extract_text(path: Path) -> str:
 
 
 def discover_attachments(root: Path, cr_number: str) -> list[Path]:
-    """Find supported files likely belonging to a CR.
-
-    Primary association is the CR number in file/folder names. If none are named that way, callers can
-    still pass explicit documents to the main pipeline; this function deliberately avoids guessing.
-    """
+    """Find supported files associated by CR number in the path; never guess unrelated evidence."""
     if not root.exists():
         return []
     needle = cr_number.lower().strip()
@@ -71,17 +68,30 @@ def discover_attachments(root: Path, cr_number: str) -> list[Path]:
 def load_attachments_for_cr(root: Path, cr_number: str) -> list[EvidenceDocument]:
     documents: list[EvidenceDocument] = []
     for path in discover_attachments(root, cr_number):
-        try:
-            text = extract_text(path)
-        except Exception as exc:
-            text = f"[EXTRACTION_ERROR] {type(exc).__name__}: {exc}"
+        suffix = path.suffix.lower()
+        metadata = {
+            "local_path": str(path),
+            "bytes": path.stat().st_size,
+            "requires_vision": suffix in IMAGE_SUFFIXES,
+            "extraction_error": None,
+        }
+        if suffix in IMAGE_SUFFIXES:
+            text = ""
+        else:
+            try:
+                text = extract_text(path)
+                if not text.strip():
+                    metadata["extraction_error"] = "No extractable text found; document may be scanned/image-only or empty."
+            except (OSError, RuntimeError, ValueError) as exc:
+                text = ""
+                metadata["extraction_error"] = f"{type(exc).__name__}: {exc}"
         documents.append(
             EvidenceDocument(
                 ref=str(path),
                 name=path.name,
                 text=text,
-                document_type=path.suffix.lower().lstrip(".") or "unknown",
-                metadata={"local_path": str(path), "bytes": path.stat().st_size},
+                document_type=suffix.lstrip(".") or "unknown",
+                metadata=metadata,
             )
         )
     return documents
