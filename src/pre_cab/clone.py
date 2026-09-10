@@ -29,7 +29,11 @@ def text_similarity(left: str, right: str) -> float:
 
 
 def change_similarity(current: dict[str, Any], historical: dict[str, Any]) -> float:
-    """Weighted similarity focused on change semantics rather than CR identifiers."""
+    """Weighted similarity focused on change semantics rather than CR identifiers.
+
+    Fields absent on both records are excluded from the denominator so missing optional metadata does
+    not artificially reduce an otherwise strong semantic match.
+    """
     weights = {
         "Type": 0.05,
         "Category": 0.15,
@@ -43,11 +47,13 @@ def change_similarity(current: dict[str, Any], historical: dict[str, Any]) -> fl
     total = 0.0
     score = 0.0
     for field, weight in weights.items():
+        a = str(current.get(field) or "").strip()
+        b = str(historical.get(field) or "").strip()
+        if not a and not b:
+            continue
         total += weight
-        a = str(current.get(field) or "")
-        b = str(historical.get(field) or "")
         if field in {"Type", "Category", "Sub Category", "Configuration item", "Company"}:
-            part = 1.0 if a.strip().lower() == b.strip().lower() and a.strip() else 0.0
+            part = 1.0 if a.lower() == b.lower() and a else 0.0
         else:
             part = text_similarity(a, b)
         score += weight * part
@@ -62,16 +68,22 @@ def clone_analysis(current: dict[str, Any], historical: dict[str, Any], similari
         historical_decision=str(historical.get("CAB Outcome") or historical.get("State") or "") or None,
         cab_recommendation=str(historical.get("CAB recommendation") or "") or None,
     )
-    compare_fields = ("Category", "Sub Category", "Implementation plan", "Test plan", "Backout plan", "Customer Approval", "Risk", "Configuration item")
+    compare_fields = (
+        "Category", "Sub Category", "Implementation plan", "Test plan", "Backout plan",
+        "Customer Approval", "Risk", "Configuration item",
+    )
     reusable: list[str] = []
     changed: list[str] = []
     for field in compare_fields:
         a = str(current.get(field) or "").strip()
         b = str(historical.get(field) or "").strip()
+        if not a and not b:
+            continue
         if text_similarity(a, b) >= 0.82:
             reusable.append(field)
-        elif a or b:
+        else:
             changed.append(field)
+
     revalidation = tuple(changed)
     if sim >= 0.90:
         recommendation = "CLONE_CANDIDATE"
