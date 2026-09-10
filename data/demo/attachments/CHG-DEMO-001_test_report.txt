@@ -1,0 +1,9 @@
+CR: CHG-DEMO-001
+Environment: Production validation after maintenance
+Validation checklist
+- Server available: PASS
+- Patch level verified: PASS
+- Required services healthy: PASS
+- AWS access validated: PASS
+Expected result: production server remains healthy after reboot.
+Actual result: all checks passed.
