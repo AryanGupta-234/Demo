@@ -75,24 +75,46 @@ def _cr_directory(root: Path, cr_number: str) -> Path | None:
     return None
 
 
+def _root_attachments(root: Path, cr_number: str) -> list[Path]:
+    """Return legacy root-level files explicitly named for this CR.
+
+    The production contract is one folder per CR, but older callers/tests may place files directly
+    under the attachment root. Only names with the exact CR number followed by a separator are
+    accepted; unrelated sibling CR evidence is never guessed.
+    """
+    needle = cr_number.strip()
+    if not needle:
+        return []
+    matches: list[Path] = []
+    for path in root.iterdir():
+        if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
+            continue
+        stem = path.stem
+        if stem == needle or stem.startswith(f"{needle}_") or stem.startswith(f"{needle}-"):
+            matches.append(path)
+    return sorted(matches)
+
+
 def discover_attachments(root: Path, cr_number: str) -> list[Path]:
     """Find supported files in the CR-specific workspace directory.
 
     The ingestion layer owns folder creation and file placement. This function only reads files
     from the resolved CR directory and never guesses unrelated evidence from sibling CR folders.
+    For backward compatibility, explicitly CR-prefixed files directly under ``root`` are also
+    accepted when no canonical CR directory exists.
     """
     if not root.exists() or not root.is_dir():
         return []
 
     cr_dir = _cr_directory(root, cr_number)
-    if cr_dir is None:
-        return []
+    if cr_dir is not None:
+        return sorted(
+            path
+            for path in cr_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES
+        )
 
-    return sorted(
-        path
-        for path in cr_dir.rglob("*")
-        if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES
-    )
+    return _root_attachments(root, cr_number)
 
 
 def load_attachments_for_cr(root: Path, cr_number: str) -> list[EvidenceDocument]:
