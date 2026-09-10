@@ -48,19 +48,35 @@ python scripts/prepare_benchmark.py real_data/cr_export.json
 python scripts/profile_fields.py real_data/cr_export.json
 ```
 
-For a fixed, reproducible benchmark sample:
+For a fixed, reproducible Stage-1 benchmark sample:
 
 ```text
 python scripts/run_benchmark.py real_data/cr_export.json --limit 0 --seed 7 --strictness balanced
 ```
 
-For the GPT-OSS 120B baseline:
+For the GPT-OSS 120B Stage-1 baseline:
 
 ```text
 python scripts/run_benchmark.py real_data/cr_export.json --limit 50 --seed 7 --strictness balanced --llm --provider auto
 ```
 
-The command writes both a benchmark report and a dataset/configuration manifest. The manifest contains hashes/counts and runtime configuration, not raw CR contents. Never provide `ground_truth.private.json` to the model prompt or retrieval memory.
+For the end-to-end benchmark (evidence-aware pipeline plus optional GPT-OSS 120B final reasoning):
+
+```text
+python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced
+python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --llm --provider auto
+```
+
+If local attachment evidence is available, include it without copying the evidence into Git:
+
+```text
+python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --attachment-root real_data/attachments
+python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --attachment-root real_data/attachments --llm --provider auto
+```
+
+Use `--stage1-only` when you specifically want to isolate Stage 1. The end-to-end harness records the pipeline mode in the manifest so Stage-1-only and full-pipeline results are not confused.
+
+The command writes a benchmark report, prediction JSONL, and dataset/configuration manifest. The manifest contains hashes/counts and runtime configuration, not raw CR contents. Never provide `ground_truth.private.json` to the model prompt or retrieval memory.
 
 Layer ablation is available through:
 
@@ -97,7 +113,7 @@ The validation endpoint accepts the CR plus extracted attachment records. The re
 - Explicit unreadable/image/scanned evidence findings.
 - Ranked evidence excerpts passed to final GPT synthesis.
 - CAB + technical reporting and stable pipeline/API contracts.
-- Read-only ServiceNow ingestion boundary.
+- Read-only ServiceNow ingestion boundary with bounded retries, timeouts, and attachment-size limits.
 - Leakage-safe Normal-CR benchmark preparation.
 - Field population/dependency profiling from a local ServiceNow export.
 - Reasoning-rich fine-tuning candidate generation with deterministic splits.
@@ -105,9 +121,9 @@ The validation endpoint accepts the CR plus extracted attachment records. The re
 - Lightweight manager-demo dashboard.
 - CI/test scaffolding.
 - Benchmark dataset fingerprints, manifests and layer-ablation tooling.
-- Reviewed requirement-level evaluation framework and reviewer feedback/episodic-memory path.
+- Reviewed requirement-level evaluation framework with per-label precision/recall/F1 and reviewer feedback/episodic-memory path.
 
-## Next milestone: real-data capability benchmark
+## Capability benchmark sequence
 
 Run entirely locally against the controlled historical dataset:
 
@@ -115,11 +131,13 @@ Run entirely locally against the controlled historical dataset:
 2. Normalize historical CAB outcomes into benchmark labels.
 3. Remove outcome-bearing and post-decision fields from model input.
 4. Build a fixed evaluation set and keep it hidden from prompt/memory during prediction.
-5. Run deterministic baseline first.
+5. Run deterministic Stage 1 first.
 6. Compare memory/clone, evidence, and GPT-OSS 120B layers with the same seed/sample.
 7. Measure accuracy, false-pass rate, false-fail rate, requirement-inference accuracy, evidence verification and clone quality.
 8. Inspect failure cases and improve rules/retrieval/prompts before considering fine-tuning.
 9. Fit/validate confidence calibration only after enough reviewed outcomes exist.
+
+The real-data execution itself should happen in the user's controlled environment; the public repository contains only the benchmark tooling and synthetic fixtures.
 
 ## Free-tier mode
 
