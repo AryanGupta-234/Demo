@@ -16,12 +16,30 @@ def main() -> int:
     parser.add_argument("--strictness", choices=[s.value for s in Strictness], default="balanced")
     parser.add_argument("--llm", action="store_true", help="Use GPT-OSS 120B for final reasoning")
     parser.add_argument("--provider", choices=["auto", "groq", "huggingface"], default="auto")
+    parser.add_argument(
+        "--attachment-root",
+        type=Path,
+        default=None,
+        help="Private local evidence directory; enables Stage-2 evidence verification in the benchmark",
+    )
+    parser.add_argument(
+        "--stage1-only",
+        action="store_true",
+        help="Benchmark only deterministic/Stage-1 reasoning instead of the full evidence-aware pipeline",
+    )
     args = parser.parse_args()
 
     examples, manifest = prepare_benchmark_artifacts(args.input, args.output_dir)
     records = json.loads(args.input.read_text(encoding="utf-8"))
     model = build_provider(args.provider) if args.llm else None
-    report = run_fixed_benchmark(records, strictness=Strictness(args.strictness), model=model)
+    full_pipeline = not args.stage1_only
+    report = run_fixed_benchmark(
+        records,
+        strictness=Strictness(args.strictness),
+        model=model,
+        full_pipeline=full_pipeline,
+        attachment_root=args.attachment_root,
+    )
     write_report(report, args.output_dir / "benchmark_report.json")
     write_predictions_jsonl(report.predictions, args.output_dir / "predictions.jsonl")
 
@@ -30,10 +48,13 @@ def main() -> int:
         "provider": args.provider,
         "llm_enabled": args.llm,
         "scorable_examples": len(examples),
+        "pipeline": "stage1" if args.stage1_only else "full",
+        "attachment_root_configured": args.attachment_root is not None,
     })
     (args.output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(report.to_dict()["metrics"], indent=2))
     print(f"Scored examples: {len(report.predictions)}")
+    print(f"Pipeline: {'stage1' if args.stage1_only else 'full evidence-aware'}")
     print(f"Artifacts: {args.output_dir}")
     return 0
 
