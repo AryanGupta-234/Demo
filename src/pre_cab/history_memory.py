@@ -6,6 +6,7 @@ from typing import Any, Iterable
 from .benchmark_leakage import strip_post_decision_fields
 from .cab_outcomes import normalize_cab_recommendation
 from .memory import InMemoryUnifiedMemory, MemoryKind, MemoryRecord
+from .sanitization import sanitize_value
 
 
 _TEXT_FIELDS = (
@@ -39,8 +40,8 @@ def build_history_memory(
 ) -> InMemoryUnifiedMemory:
     """Create memory from non-holdout Normal CRs.
 
-    Historical outcomes are metadata on reference examples only. The caller is responsible for never
-    passing holdout/test rows into this function.
+    Reference outcomes may be retained as explicit historical metadata, while ``source_record`` is
+    stripped of post-decision fields. Holdout/test rows must never be passed to this function.
     """
     memory = InMemoryUnifiedMemory(embedding_provider=embedding_provider)
     for row in reference_rows:
@@ -48,6 +49,7 @@ def build_history_memory(
             continue
         number = str(row.get("Number") or row.get("Effective number") or "unknown").strip()
         outcome = normalize_cab_recommendation(row.get("CAB Outcome") or row.get("CAB recommendation"))
+        clean_source = sanitize_value(strip_post_decision_fields(row))
         text = _history_text(row)
         if not text:
             continue
@@ -62,6 +64,7 @@ def build_history_memory(
                     "category": row.get("Category"),
                     "sub_category": row.get("Sub Category"),
                     "change_class": row.get("Change Class"),
+                    "source_record": clean_source,
                 },
             )
         )
