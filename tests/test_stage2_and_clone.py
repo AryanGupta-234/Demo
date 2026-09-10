@@ -1,57 +1,36 @@
 from pre_cab.clone import change_similarity, clone_analysis
 from pre_cab.evidence import EvidenceDocument, verify_attachments
-from pre_cab.schemas import Decision, Requirement, Strictness
+from pre_cab.schemas import Decision, FindingSeverity, Requirement, Strictness
 
 
 def test_missing_customer_approval_document_blocks_claim():
-    cr = {
-        "Number": "CHG-DEMO-010",
-        "Customer Approval": "Yes",
-        "Test plan": "UAT completed",
-        "Test Results Evidence": "Yes",
-        "Backout plan": "Restore the previous application artifact from backup.",
-    }
+    cr = {"Number": "CHG-DEMO-010", "Customer Approval": "Yes", "Test plan": "UAT completed", "Test Results Evidence": "Yes", "Backout plan": "Restore the previous application artifact from backup."}
     docs = [EvidenceDocument("test-1", "uat.txt", "CHG-DEMO-010\nUAT test cases\nExpected result: pass\nActual result: pass")]
-    result = verify_attachments(
-        cr,
-        docs,
-        requirements=[Requirement("UAT", True, "functional change")],
-        strictness=Strictness.BALANCED,
-    )
+    result = verify_attachments(cr, docs, requirements=[Requirement("UAT", True, "functional change")], strictness=Strictness.BALANCED)
     assert result.decision == Decision.NOT_READY
     assert result.verified["testing"] is True
     assert result.verified["customer_approval"] is False
 
 
 def test_uat_dev_only_contradiction_is_blocking():
-    cr = {
-        "Number": "CHG-DEMO-011",
-        "Test plan": "Successfully tested in UAT",
-        "Test Results Evidence": "Yes",
-        "Backout plan": "Restore the previous release from backup.",
-    }
+    cr = {"Number": "CHG-DEMO-011", "Test plan": "Successfully tested in UAT", "Test Results Evidence": "Yes", "Backout plan": "Restore the previous release from backup."}
     docs = [EvidenceDocument("test-2", "test-report.txt", "CHG-DEMO-011\nDEV testing completed\nExpected result: pass")]
     result = verify_attachments(cr, docs, requirements=[Requirement("UAT", True, "customer-facing change")])
     assert result.decision == Decision.NOT_READY
     assert any("environment" in text.lower() for text in result.contradictions)
 
 
+def test_unreadable_attachment_is_explicitly_flagged():
+    cr = {"Number": "CHG-DEMO-012", "Backout plan": "Restore previous release."}
+    doc = EvidenceDocument("scan.png", "CHG-DEMO-012-test-evidence.png", "", document_type="png", metadata={"requires_vision": True})
+    result = verify_attachments(cr, [doc], strictness=Strictness.BALANCED)
+    finding = next(f for f in result.findings if f.code == "EVIDENCE_UNREADABLE")
+    assert finding.severity == FindingSeverity.WARNING
+    assert "scan.png" in finding.evidence_refs
+
+
 def test_strong_clone_candidate_and_delta():
-    historical = {
-        "Number": "CHG-HIST-001",
-        "Type": "Normal",
-        "Category": "Core",
-        "Sub Category": "Branch",
-        "Short description": "Deploy application enhancement",
-        "Description": "Customer-facing enhancement to transaction behavior.",
-        "Implementation plan": "Backup artifact and deploy new application version, then restart service.",
-        "Test plan": "UAT functional validation completed.",
-        "Backout plan": "Restore previous application artifact from backup.",
-        "Customer Approval": "Yes",
-        "Risk": "Moderate",
-        "Configuration item": "demo-prod",
-        "CAB Outcome": "Approved",
-    }
+    historical = {"Number": "CHG-HIST-001", "Type": "Normal", "Category": "Core", "Sub Category": "Branch", "Short description": "Deploy application enhancement", "Description": "Customer-facing enhancement to transaction behavior.", "Implementation plan": "Backup artifact and deploy new application version, then restart service.", "Test plan": "UAT functional validation completed.", "Backout plan": "Restore previous application artifact from backup.", "Customer Approval": "Yes", "Risk": "Moderate", "Configuration item": "demo-prod", "CAB Outcome": "Approved"}
     current = dict(historical)
     current["Number"] = "CHG-NEW-001"
     current["Short description"] = "Deploy application enhancement - September release"
