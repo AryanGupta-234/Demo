@@ -63,7 +63,9 @@ def verify_attachments(
 
     reqs = requirements or []
     test_required = any(r.required and r.name.lower() in {"uat", "testing", "test evidence"} for r in reqs)
-    test_claim = _norm(cr.get("Test Results Evidence")) in {"yes", "available", "attached"} or bool(str(cr.get("Test plan") or "").strip())
+    test_plan = _norm(cr.get("Test plan"))
+    test_results_claim = _norm(cr.get("Test Results Evidence")) in {"yes", "available", "attached"}
+    test_claim = test_results_claim or bool(test_plan)
     test_docs = [d for d in relevant if _contains_any(d.text, ("uat", "test result", "test case", "test evidence", "user acceptance", "execution result", "testing", "tested", "expected result", "actual result"))]
     verified["testing"] = bool(test_docs) if (test_required or test_claim) else True
     if test_required or test_claim:
@@ -101,11 +103,34 @@ def verify_attachments(
         if document.metadata.get("requires_vision") and not document.text.strip():
             findings.append(Finding("EVIDENCE_UNREADABLE", "Image evidence requires visual review", FindingSeverity.WARNING, f"Attachment {document.name} is image-based and has no extracted text.", evidence_refs=(document.ref,)))
 
-    dev_only = any("dev-only" in _norm(d.text) or "dev testing" in _norm(d.text) for d in relevant)
-    prod_target = _norm(cr.get("Environment")) in {"prod", "production"}
-    if dev_only and (prod_target or test_required):
-        contradictions.append("Attachment indicates DEV-only validation while the CR requires UAT or targets production.")
-        findings.append(Finding("EVIDENCE_TEST_ENV_MISMATCH", "Testing environment mismatch", FindingSeverity.BLOCKING, "Evidence indicates DEV-only validation while the CR requires UAT or targets production.", recommendation="Provide UAT/production-equivalent validation evidence or resolve the environment mismatch before CAB."))
+    dev_only_markers = (
+        "dev-only", "dev only", "dev testing", "testing in dev", "tested in dev",
+        "development environment", "development testing", "dev environment",
+        "tested on dev", "test environment: dev", "environment: dev",
+    )
+    dev_only_docs = [d for d in relevant if _contains_any(d.text, dev_only_markers)]
+    production_target = _norm(cr.get("Environment")) in {"prod", "production"}
+    uat_required_or_claimed = test_required or "uat" in test_plan or "user acceptance" in test_plan or test_results_claim
+    if dev_only_docs and uat_required_or_claimed:
+        contradictions.append("Testing environment contradiction: UAT is required/claimed, but the supplied evidence documents DEV-only testing.")
+        findings.append(Finding(
+            "EVIDENCE_TEST_ENV_MISMATCH",
+            "Testing environment mismatch",
+            FindingSeverity.BLOCKING,
+            "UAT is required or claimed, but the supplied evidence only documents DEV-only validation.",
+            evidence_refs=tuple(d.ref for d in dev_only_docs),
+            recommendation="Provide UAT-equivalent evidence or resolve the testing environment mismatch before CAB.",
+        ))
+    elif dev_only_docs and production_target:
+        contradictions.append("Testing environment contradiction: evidence documents DEV-only testing while the CR targets production.")
+        findings.append(Finding(
+            "EVIDENCE_TEST_ENV_MISMATCH",
+            "Testing environment mismatch",
+            FindingSeverity.BLOCKING,
+            "Evidence indicates DEV-only validation while the CR targets production.",
+            evidence_refs=tuple(d.ref for d in dev_only_docs),
+            recommendation="Provide production-equivalent validation evidence or resolve the environment mismatch before CAB.",
+        ))
 
     if any(f.severity == FindingSeverity.BLOCKING for f in findings):
         decision = Decision.NOT_READY
