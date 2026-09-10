@@ -10,6 +10,7 @@ from .benchmark_leakage import POST_DECISION_FIELDS, leakage_report
 from .benchmark_manifest import build_manifest
 from .benchmark_prepare import BenchmarkExample, prepare_normal_benchmark
 from .benchmark_runner import BenchmarkReport, run_benchmark
+from .input_loader import load_cr_records
 from .schemas import Strictness
 
 
@@ -28,9 +29,7 @@ def prepare_benchmark_artifacts(
     """Create sanitized input, private labels, and a reproducibility manifest locally."""
     source = Path(input_path)
     output = Path(output_dir)
-    records = json.loads(source.read_text(encoding="utf-8"))
-    if not isinstance(records, list) or not all(isinstance(row, dict) for row in records):
-        raise ValueError("Input JSON must contain a list of objects")
+    records = load_cr_records(source)
     examples = prepare_normal_benchmark(records)
     output.mkdir(parents=True, exist_ok=True)
     (output / "normal_inputs.json").write_text(
@@ -58,14 +57,12 @@ def prepare_benchmark_artifacts(
 
 
 def write_report(report: BenchmarkReport, path: str | Path) -> None:
-    """Write a complete benchmark report without exposing source record contents."""
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
 
 
 def write_predictions_jsonl(predictions: Iterable[Any], path: str | Path) -> None:
-    """Write one prediction per line for easy failure-bucket analysis."""
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("w", encoding="utf-8") as handle:
@@ -90,6 +87,5 @@ def run_fixed_benchmark(
     model: Any = None,
     memory: Any = None,
 ) -> BenchmarkReport:
-    """Run only examples with normalized labels; labels never enter the model input."""
     examples = [item for item in prepare_normal_benchmark(records) if item.actual is not None]
     return run_benchmark(examples, strictness=strictness, model=model, memory=memory)
