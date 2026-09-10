@@ -156,11 +156,17 @@ def run_stage1(
         stage1.technical_summary = str(brain_payload.get("technical_reasoning") or stage1.technical_summary)
         stage1.cab_summary = str(brain_payload.get("cab_reasoning") or stage1.cab_summary)
 
+    agent_notes = {result.agent: result.notes for result in results}
+    clone_candidates = agent_notes.get("clone", {}).get("clone_candidates", [])
+    if isinstance(clone_candidates, list):
+        stage1.historical_matches = clone_candidates
+
     stage1.metadata.update(
         {
             "stage": 1,
             "stage_2_required": decision != Decision.NOT_READY,
             "agents": [result.agent for result in results],
+            "agent_notes": agent_notes,
             "reasoning_mode": reasoning.mode if reasoning is not None else "none",
             "reasoning_passes": (2 if reasoning and reasoning.critique is not None else (1 if reasoning else 0)),
             "model": getattr(model, "model_name", None),
