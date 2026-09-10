@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .benchmark_leakage import strip_post_decision_fields
 from .schemas import Decision
 
 
@@ -15,18 +16,24 @@ class BenchmarkExample:
 
 
 def normalize_outcome(record: dict[str, Any]) -> Decision | None:
-    """Map explicit historical outcome text to the validator's three-way benchmark label.
+    """Map explicit historical CAB text to a three-way benchmark label.
 
-    Unknown or ambiguous CAB text remains unscored rather than being guessed.
+    Ambiguous operational notes remain unscored instead of being guessed.
     """
     raw = str(record.get("CAB Outcome") or record.get("CAB recommendation") or "").strip().lower()
     if not raw:
         return None
-    if any(term in raw for term in ("not ready", "rejected", "reject", "hold", "held")):
+    if any(term in raw for term in (
+        "cancellation requested", "request for cancellation", "cancelled as",
+        "cancelled", "cancel", "rejected", "reject", "insufficient information", "hold", "held",
+    )):
         return Decision.NOT_READY
-    if any(term in raw for term in ("conditional", "condition", "clarification", "proceed with condition")):
+    if any(term in raw for term in (
+        "conditionally approved", "conditional", "condition", "test results reqd",
+        "schedule needs to be updated",
+    )):
         return Decision.CONDITIONAL
-    if any(term in raw for term in ("approved", "approve", "proceed", "ok")):
+    if raw in {"approved", "approve", "approvd", "approved."} or raw.startswith("approved "):
         return Decision.PASS
     return None
 
@@ -37,8 +44,7 @@ def prepare_normal_benchmark(records: Iterable[dict[str, Any]]) -> list[Benchmar
         if str(original.get("Type") or "").strip().lower() != "normal":
             continue
         actual = normalize_outcome(original)
-        hidden = dict(original)
-        # Do not let the target answer leak into model-visible input.
+        hidden = strip_post_decision_fields(dict(original))
         for key in ("CAB Outcome", "CAB recommendation", "CAB Recommendation", "historical_prediction_label"):
             hidden.pop(key, None)
         source_id = str(original.get("Number") or original.get("Effective number") or "unknown")
