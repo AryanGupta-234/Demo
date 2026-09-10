@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Iterable
+from typing import Any, Iterable
 
 
-def _binary_scores(actual: list[str], predicted: list[str], positive: str) -> dict[str, float | int]:
+def _binary_scores(actual: list[str], predicted: list[str], positive: str) -> dict[str, Any]:
     tp = sum(a == positive and p == positive for a, p in zip(actual, predicted))
     fp = sum(a != positive and p == positive for a, p in zip(actual, predicted))
     fn = sum(a == positive and p != positive for a, p in zip(actual, predicted))
