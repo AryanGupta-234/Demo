@@ -96,6 +96,7 @@ def run_benchmark(
     for example in examples:
         if example.actual is None:
             continue
+        actual = example.actual
         if full_pipeline:
             result = run_pre_cab(
                 example.input_record,
@@ -121,7 +122,7 @@ def run_benchmark(
         predictions.append(
             BenchmarkPrediction(
                 source_id=example.source_id,
-                actual=example.actual,
+                actual=actual,
                 predicted=predicted,
                 confidence=stage1.confidence,
                 strictness=strictness,
@@ -136,7 +137,7 @@ def run_benchmark(
         CalibrationPoint(item.confidence, item.correct, item.predicted, item.actual)
         for item in predictions
     ]
-    failures = Counter()
+    failures: Counter[str] = Counter()
     for item in predictions:
         if item.correct:
             continue
