@@ -14,7 +14,9 @@ class ModelResponse:
 
 
 class ModelProvider(Protocol):
-    model_name: str
+    @property
+    def model_name(self) -> str:
+        ...
 
     def generate(
         self,
