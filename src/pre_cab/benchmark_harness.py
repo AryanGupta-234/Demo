@@ -8,7 +8,7 @@ from typing import Any, Iterable
 
 from .benchmark_leakage import POST_DECISION_FIELDS, leakage_report
 from .benchmark_manifest import build_manifest
-from .benchmark_prepare import BenchmarkExample, prepare_normal_benchmark
+from .benchmark_prepare import BenchmarkExample, benchmark_diagnostics, prepare_normal_benchmark
 from .benchmark_runner import BenchmarkReport, run_benchmark
 from .input_loader import load_cr_records
 from .schemas import Strictness
@@ -26,10 +26,13 @@ def prepare_benchmark_artifacts(
     input_path: str | Path,
     output_dir: str | Path,
 ) -> tuple[list[BenchmarkExample], dict[str, Any]]:
+    """Create sanitized input, private labels, and a reproducibility manifest locally."""
     source = Path(input_path)
     output = Path(output_dir)
     records = load_cr_records(source)
-    examples = prepare_normal_benchmark(records)
+    diagnostics = benchmark_diagnostics(records)
+    preferred = diagnostics.get("selected_outcome_field")
+    examples = prepare_normal_benchmark(records, preferred_outcome_field=preferred)
     output.mkdir(parents=True, exist_ok=True)
     (output / "normal_inputs.json").write_text(
         json.dumps([item.input_record for item in examples], ensure_ascii=False, indent=2),
@@ -58,6 +61,7 @@ def prepare_benchmark_artifacts(
         "scorable_records": scorable,
         "unscorable_records": len(examples) - scorable,
     }
+    manifest["benchmark_diagnostics"] = diagnostics
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return examples, manifest
 
@@ -94,8 +98,10 @@ def run_fixed_benchmark(
     full_pipeline: bool = True,
     attachment_root: str | Path | None = None,
 ) -> BenchmarkReport:
-    """Run the benchmark with the same Stage-1/full-pipeline mode selected by the CLI."""
-    examples = [item for item in prepare_normal_benchmark(records) if item.actual is not None]
+    """Run the benchmark using a globally selected, leakage-safe historical outcome field."""
+    diagnostics = benchmark_diagnostics(records)
+    preferred = diagnostics.get("selected_outcome_field")
+    examples = [item for item in prepare_normal_benchmark(records, preferred_outcome_field=preferred) if item.actual is not None]
     return run_benchmark(
         examples,
         strictness=strictness,
