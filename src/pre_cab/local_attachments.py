@@ -1,4 +1,8 @@
-"""Local attachment discovery for offline/private benchmark and demo runs.
+"""Local attachment discovery for offline/private benchmark and production handoff runs.
+
+The ServiceNow ingestion/file-management layer is intentionally outside this module. It is expected
+ to create one directory per CR and place that CR's downloaded attachments inside it. This module
+consumes that prepared workspace without making ServiceNow calls or modifying the files.
 
 Files remain on the caller's machine. Supported text/tabular documents are extracted locally. Image
 attachments are retained as explicit unparsed evidence so the validator never silently ignores them.
@@ -50,19 +54,45 @@ def extract_text(path: Path) -> str:
     return ""
 
 
+def _cr_directory(root: Path, cr_number: str) -> Path | None:
+    """Resolve the ingestion layer's canonical ``<root>/<CR number>`` directory.
+
+    The exact directory match is preferred so an attachment belonging to CR123 is never selected
+    merely because another path happens to contain the same string. A recursive fallback is kept
+    for compatibility with the earlier private benchmark layout where CR folders could be nested.
+    """
+    needle = cr_number.strip()
+    if not needle:
+        return None
+
+    direct = root / needle
+    if direct.is_dir():
+        return direct
+
+    for candidate in root.rglob(needle):
+        if candidate.is_dir() and candidate.name == needle:
+            return candidate
+    return None
+
+
 def discover_attachments(root: Path, cr_number: str) -> list[Path]:
-    """Find supported files associated by CR number in the path; never guess unrelated evidence."""
-    if not root.exists():
+    """Find supported files in the CR-specific workspace directory.
+
+    The ingestion layer owns folder creation and file placement. This function only reads files
+    from the resolved CR directory and never guesses unrelated evidence from sibling CR folders.
+    """
+    if not root.exists() or not root.is_dir():
         return []
-    needle = cr_number.lower().strip()
-    matches: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
-            continue
-        relative = str(path.relative_to(root)).lower()
-        if needle and needle in relative:
-            matches.append(path)
-    return sorted(matches)
+
+    cr_dir = _cr_directory(root, cr_number)
+    if cr_dir is None:
+        return []
+
+    return sorted(
+        path
+        for path in cr_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES
+    )
 
 
 def load_attachments_for_cr(root: Path, cr_number: str) -> list[EvidenceDocument]:
