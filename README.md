@@ -27,14 +27,34 @@ Model-independent proof of concept for validating **Normal** ServiceNow Change R
 8. Historical frequency is advisory evidence, not automatic policy. Governance rules remain explicit and reviewable.
 9. Free-tier operation favors local preprocessing/retrieval and one high-value GPT-OSS 120B synthesis pass rather than many independent model calls.
 
-## Current API
+## Run the manager demo
 
-Install the optional API dependencies with `pip install -e '.[api]'`. The core HTTP surface is:
+```text
+pip install -e '.[all]'
+uvicorn pre_cab.api:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+Then open `http://127.0.0.1:8000/`.
+
+The demo UI keeps the CAB result prominent while retaining technical findings and evidence detail underneath.
+
+## Local historical-data benchmark
+
+Keep the real ServiceNow export outside Git. The benchmark preparation scripts read the local file, filter to Normal changes, remove outcome-bearing fields, and write sanitized model input plus a private ground-truth file.
+
+```text
+python scripts/prepare_benchmark.py real_data/cr_export.json
+python scripts/profile_fields.py real_data/cr_export.json
+```
+
+Never provide `ground_truth.private.json` to the model prompt or retrieval memory.
+
+## Current API
 
 - `GET /health`
 - `POST /v1/pre-cab/validate`
 
-The response contains both `cab_view` and `technical_view` so the technical layer is retained without making the CAB reviewer parse implementation detail first.
+The validation endpoint accepts the CR plus extracted attachment records. The response contains both `cab_view` and `technical_view`.
 
 ## Current development state
 
@@ -53,19 +73,21 @@ The response contains both `cab_view` and `technical_view` so the technical laye
 - PDF/XLSX/text attachment adapters and Stage-2 evidence verification.
 - Claim/evidence verification and contradiction detection.
 - CAB + technical reporting and stable pipeline/API contracts.
+- Read-only ServiceNow ingestion boundary.
 - Leakage-safe Normal-CR benchmark preparation.
 - Field population/dependency profiling from a local ServiceNow export.
 - Reasoning-rich fine-tuning candidate generation with deterministic splits.
 - Synthetic Normal-CR and attachment fixtures.
+- Lightweight manager-demo dashboard.
 - CI/test scaffolding.
 
-### Next milestone: real-data capability benchmark
+## Next milestone: real-data capability benchmark
 
 Run entirely locally against the controlled historical dataset:
 
 1. Profile the 141-field Normal-CR schema and population patterns.
 2. Normalize historical CAB outcomes into benchmark labels.
-3. Remove outcome-bearing fields from model input.
+3. Remove outcome-bearing and post-decision fields from model input.
 4. Build a fixed evaluation set and keep it hidden from prompt/memory during prediction.
 5. Run GPT-OSS 120B with the current rules, retrieval, memory and reasoning loop.
 6. Measure accuracy, false-pass rate, false-fail rate, requirement-inference accuracy, evidence verification and clone quality.
@@ -137,7 +159,8 @@ src/
 data/
   demo/              Synthetic demo dataset only
 
-scripts/benchmark/   Local benchmark/profile/training-data utilities
+config/              Explicit Normal-CR governance rules
+scripts/             Local demo, benchmark, and profiling utilities
 
 tests/               Unit and integration regression tests
 ```
