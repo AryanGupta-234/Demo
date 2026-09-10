@@ -7,8 +7,8 @@ Model-independent proof of concept for validating **Normal** ServiceNow Change R
 - Normal CRs are the primary supported change type.
 - Emergency CRs are intentionally out of scope for V1.
 - Standard CRs are secondary.
-- GPT-OSS 120B via Groq is the initial reasoning model.
-- The model gateway remains provider-agnostic so the underlying model can change without changing agent behavior.
+- GPT-OSS 120B is the only V1 reasoning model; Groq is the primary free inference route and Hugging Face Inference Providers is an alternate route for the same model.
+- The model gateway is provider-agnostic so the underlying inference provider/model can change without changing agent behavior.
 - Three configurable strictness profiles: Lenient, Balanced, Strict.
 - Unified memory combines structured, semantic, episodic, policy, evidence, and CAB-history knowledge.
 - Multi-agent reasoning covers CR fields, context, technical impact, business/CAB impact, testing, evidence, risk, similarity/clone detection, and final decisioning.
@@ -21,16 +21,11 @@ Model-independent proof of concept for validating **Normal** ServiceNow Change R
 2. UAT is contextual, not universally mandatory. Requirements are inferred from the type and scope of the change.
 3. A rollback plan can pass when it establishes a credible recovery path even if the procedure is brief; detail affects quality/confidence.
 4. Similar historical CRs can become clone candidates, but clones always undergo delta validation.
-5. The benchmark phase measures GPT-OSS 120B capability before any fine-tuning so improvements remain measurable.
+5. The benchmark measures GPT-OSS 120B capability before any fine-tuning so improvements remain measurable.
 6. Sensitive production data should not be committed to this public demo repository. Use synthetic data for demonstrations.
 7. The reasoning brain explicitly separates observed facts, inferences, uncertainties, contradictions and recommendations, and performs a self-critique pass before a recommendation.
-8. Free-tier mode spends model calls only on high-value reasoning; deterministic agents, retrieval, parsing and policy checks run locally first.
-
-## Free-tier development mode
-
-The current V1 is designed around Groq's current free-plan limits for `openai/gpt-oss-120b`: 30 requests/minute, 1,000 requests/day, 8K tokens/minute, and 200K tokens/day. The code therefore budgets one bounded synthesis call per CR and requires retrieval/compaction before sending oversized context. See `src/pre_cab/budget.py`.
-
-The model adapter uses GPT-OSS 120B reasoning mode and structured JSON-schema output. This gives the agents a stable machine-readable contract while keeping the model replaceable later.
+8. Historical frequency is advisory evidence, not automatic policy. Governance rules remain explicit and reviewable.
+9. Free-tier operation favors local preprocessing/retrieval and one high-value GPT-OSS 120B synthesis pass rather than many independent model calls.
 
 ## Current API
 
@@ -39,81 +34,110 @@ Install the optional API dependencies with `pip install -e '.[api]'`. The core H
 - `GET /health`
 - `POST /v1/pre-cab/validate`
 
-Example request shape:
-
-```json
-{
-  "strictness": "balanced",
-  "cr": {
-    "Number": "CHG-DEMO-001",
-    "Type": "Normal",
-    "Short description": "Monthly OS security patching",
-    "Description": "Patch production management servers and reboot them.",
-    "Justification": "Remediate operating-system vulnerabilities.",
-    "Implementation plan": "Apply approved patches, reboot, validate service health.",
-    "Backout plan": "Restore the previous server image from backup.",
-    "Test plan": "Validate service availability and patch level after reboot.",
-    "Risk": "Low",
-    "Configuration item": "demo-management-prod",
-    "Conflict status": "No Conflict"
-  }
-}
-```
-
 The response contains both `cab_view` and `technical_view` so the technical layer is retained without making the CAB reviewer parse implementation detail first.
 
-## Planned layout
+## Current development state
+
+### Implemented
+
+- Typed CR, finding, requirement and agent-context contracts.
+- Deterministic field validation and three strictness profiles.
+- Contextual UAT/customer-approval/outage applicability signals.
+- Credible rollback/recovery detection.
+- Hybrid retrieval baseline and clone/delta analysis.
+- Shared multi-agent context and a two-pass reasoning brain.
+- Groq GPT-OSS 120B adapter with structured-output/reasoning support.
+- Hugging Face GPT-OSS 120B adapter with provider-policy routing.
+- Free-tier inference budget guardrails.
+- Persistent local unified memory and replayable audit traces.
+- PDF/XLSX/text attachment adapters and Stage-2 evidence verification.
+- Claim/evidence verification and contradiction detection.
+- CAB + technical reporting and stable pipeline/API contracts.
+- Leakage-safe Normal-CR benchmark preparation.
+- Field population/dependency profiling from a local ServiceNow export.
+- Reasoning-rich fine-tuning candidate generation with deterministic splits.
+- Synthetic Normal-CR and attachment fixtures.
+- CI/test scaffolding.
+
+### Next milestone: real-data capability benchmark
+
+Run entirely locally against the controlled historical dataset:
+
+1. Profile the 141-field Normal-CR schema and population patterns.
+2. Normalize historical CAB outcomes into benchmark labels.
+3. Remove outcome-bearing fields from model input.
+4. Build a fixed evaluation set and keep it hidden from prompt/memory during prediction.
+5. Run GPT-OSS 120B with the current rules, retrieval, memory and reasoning loop.
+6. Measure accuracy, false-pass rate, false-fail rate, requirement-inference accuracy, evidence verification and clone quality.
+7. Inspect failure cases and improve rules/retrieval/prompts before considering fine-tuning.
+
+## Free-tier mode
+
+The intended V1 operating pattern is:
+
+```text
+Local preprocessing
+      ↓
+Local retrieval + memory
+      ↓
+Deterministic specialist agents
+      ↓
+One bounded GPT-OSS 120B reasoning/synthesis pass
+      ↓
+Deterministic decision gates
+```
+
+Provider routing:
+
+```text
+Groq GPT-OSS 120B
+        ↓
+Hugging Face GPT-OSS 120B (alternate)
+```
+
+API keys are environment variables only (`GROQ_API_KEY`, `HF_TOKEN`); they are never stored in source control.
+
+## Fine-tuning path
+
+Fine-tuning is deliberately deferred until the baseline benchmark is understood. The repository already contains a reviewable reasoning-example builder, but no model weights are changed by it.
+
+Future paid path:
+
+```text
+Benchmark baseline
+    ↓
+Improve rules / retrieval / prompts
+    ↓
+Build reviewed reasoning examples
+    ↓
+Train / fine-tune GPT-OSS 120B
+    ↓
+Evaluate on untouched test set
+    ↓
+Compare against baseline
+```
+
+## Repository layout
 
 ```text
 src/
-  api/               FastAPI application and contracts
-  agents/            Specialized agent implementations
-  brain/             Reasoning state, hypotheses and self-critique
-  decision/          Deterministic decision and strictness engine
-  documents/         Attachment extraction and evidence verification
-  memory/            Unified-memory interfaces and storage adapters
-  models/            LLM provider abstraction + Groq adapter
-  retrieval/         Hybrid SQL/vector/keyword retrieval
-  schemas/           Shared typed contracts
-  similarity/        Historical matching and clone/delta analysis
-  validation/        CR field and contextual validation rules
-  reporting/         CAB-readable + technical result generation
-  config/             Runtime configuration
+  pre_cab/
+    agents/          Specialized agent implementations
+    brain/           Reasoning state, hypotheses and self-critique
+    decision/        Deterministic decision and strictness engine
+    documents/       Attachment extraction and evidence verification
+    memory/          Unified-memory interfaces and storage adapters
+    models/          LLM provider abstraction + Groq/HF adapters
+    retrieval/       Hybrid structured/semantic/keyword retrieval
+    similarity/      Historical matching and clone/delta analysis
+    reporting/       CAB-readable + technical result generation
+    api/             HTTP API contracts and handlers
+    config/          Runtime configuration
 
 data/
   demo/              Synthetic demo dataset only
 
-tests/
-  unit/
-  integration/
-  evaluation/
+scripts/benchmark/   Local benchmark/profile/training-data utilities
 
-scripts/
-  benchmark/         Historical benchmark utilities
+tests/               Unit and integration regression tests
 ```
-
-## Development phases
-
-### Phase 1 — Foundation
-
-Typed contracts, configuration, strictness profiles, model gateway, unified-memory interfaces, deterministic decision engine, and safe synthetic fixtures.
-
-### Phase 2 — Retrieval + reasoning
-
-Hybrid retrieval, similar-change/clone analysis, shared agent context, structured reasoning brain, self-critique and stable reporting contracts.
-
-### Phase 3 — Evidence gate
-
-Attachment discovery, PDF/XLSX/email extraction, claim-to-evidence verification, contradiction detection, and evidence quality scoring.
-
-### Phase 4 — Service/API integration
-
-Stable HTTP API, ServiceNow adapter boundary, audit events, authentication and request-level observability.
-
-### Phase 5 — Benchmark
-
-Replay historical Normal CRs without exposing their CAB outcomes to the model, then compare predictions with historical outcomes and measure false-pass rate.
-
-### Phase 6 — Demo
-
-CAB-first dashboard with technical drill-down, predicted CAB questions, clone suggestions, and audit trail.
