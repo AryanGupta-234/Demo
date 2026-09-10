@@ -71,6 +71,28 @@ def verify_attachments(
     verified: dict[str, bool] = {}
     contradictions: list[str] = []
 
+    # Images/scanned files are retained by the loader, but their contents must not count as verified
+    # until an approved OCR/vision path has actually inspected them.
+    unreadable = [
+        d for d in relevant
+        if d.metadata.get("requires_vision") or d.metadata.get("extraction_error")
+    ]
+    for document in unreadable:
+        reason = (
+            "image-only evidence requires vision/OCR"
+            if document.metadata.get("requires_vision")
+            else str(document.metadata.get("extraction_error"))
+        )
+        findings.append(Finding(
+            "EVIDENCE_UNREADABLE",
+            "Evidence could not be content-verified",
+            _severity_for_weak_evidence(strictness),
+            "An attachment was discovered but its contents could not be reliably extracted for verification.",
+            technical_detail=f"Document={document.ref}; reason={reason}",
+            evidence_refs=(document.ref,),
+            recommendation="Provide machine-readable evidence or enable an approved OCR/vision extraction path before relying on the attachment.",
+        ))
+
     reqs = requirements or []
     test_required = any(r.required and r.name.lower() in {"uat", "testing", "test evidence"} for r in reqs)
     test_claim = _norm(cr.get("Test Results Evidence")) in {"yes", "available", "attached"} or bool(str(cr.get("Test plan") or "").strip())
