@@ -70,13 +70,14 @@ def discover_outcome_fields(records: Sequence[dict[str, Any]]) -> list[dict[str,
         decision_hits = sum(any(term in value.lower() for term in _DECISION_TERMS) for value in nonempty)
         key_text = _normalized_key(key)
         name_score = sum(token in key_text for token in ("cab", "outcome", "recommendation", "decision", "disposition"))
-        score = (decision_hits / len(nonempty) if nonempty else 0.0) * 100 + name_score * 10
-        if nonempty and decision_hits:
+        decision_rate = decision_hits / len(nonempty) if nonempty else 0.0
+        score = decision_rate * 100 + name_score * 10
+        if nonempty:
             fields.append({
                 "field": key,
                 "nonempty": len(nonempty),
                 "decision_hits": decision_hits,
-                "decision_rate": round(decision_hits / len(nonempty), 4),
+                "decision_rate": round(decision_rate, 4),
                 "score": round(score, 2),
                 "sample_values": list(dict.fromkeys(nonempty))[:10],
             })
@@ -127,11 +128,12 @@ def normalize_outcome(record: dict[str, Any], preferred_field: str | None = None
 
 def prepare_normal_benchmark(records: Iterable[dict[str, Any]], preferred_outcome_field: str | None = None) -> list[BenchmarkExample]:
     rows = list(records)
+    preferred = preferred_outcome_field or (discover_outcome_fields(rows)[0]["field"] if discover_outcome_fields(rows) else None)
     examples: list[BenchmarkExample] = []
     for original in rows:
         if not _is_normal(original):
             continue
-        actual = normalize_outcome(original, preferred_outcome_field)
+        actual = normalize_outcome(original, preferred)
         hidden = strip_post_decision_fields(dict(original))
         for key in list(hidden):
             if _looks_like_outcome_field(key):
@@ -145,12 +147,12 @@ def benchmark_diagnostics(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     rows = list(records)
     normal_rows = [row for row in rows if _is_normal(row)]
     candidates = discover_outcome_fields(rows)
-    preferred = candidates[0]["field"] if candidates else None
+    preferred = candidates[0]["field"] if candidates and candidates[0]["decision_hits"] else None
     outcomes = Counter(_outcome_field(row, preferred) for row in normal_rows if _outcome_field(row, preferred))
     return {
         "total_records": len(rows),
         "normal_records": len(normal_rows),
-        "candidate_outcome_fields": candidates[:10],
+        "candidate_outcome_fields": candidates[:15],
         "selected_outcome_field": preferred,
         "records_with_outcome_text": sum(bool(_outcome_field(row, preferred)) for row in normal_rows),
         "scorable_records": sum(normalize_outcome(row, preferred) is not None for row in normal_rows),
