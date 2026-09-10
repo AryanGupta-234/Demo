@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 from .benchmark_metrics import SafetyMetrics, compute_safety_metrics
 from .benchmark_prepare import BenchmarkExample
 from .calibration import CalibrationPoint, expected_calibration_error
 from .orchestrator import run_stage1
+from .pipeline import run_pre_cab
 from .schemas import Decision, Strictness
 
 
@@ -81,27 +83,51 @@ def run_benchmark(
     strictness: Strictness = Strictness.BALANCED,
     model: Any = None,
     memory: Any = None,
+    full_pipeline: bool = False,
+    attachment_root: str | Path | None = None,
 ) -> BenchmarkReport:
+    """Run a leakage-safe benchmark.
+
+    By default this evaluates Stage 1 only, which is useful for measuring deterministic/model
+    reasoning in isolation. ``full_pipeline=True`` evaluates evidence verification plus the final
+    reasoning reconciliation; attachment_root may point at a private local evidence directory.
+    """
     predictions: list[BenchmarkPrediction] = []
     for example in examples:
         if example.actual is None:
             continue
-        result = run_stage1(
-            example.input_record,
-            strictness=strictness,
-            model=model,
-            memory=memory,
-        ).stage1
+        if full_pipeline:
+            result = run_pre_cab(
+                example.input_record,
+                strictness=strictness,
+                model=model,
+                memory=memory,
+                attachment_root=attachment_root,
+            )
+            stage1 = result.stage1
+            predicted = result.final_decision
+            model_prediction = result.final_reasoning.model_prediction.value if result.final_reasoning and result.final_reasoning.model_prediction else None
+            deterministic_prediction = stage1.metadata.get("deterministic_final") or stage1.metadata.get("deterministic_prediction")
+        else:
+            stage1 = run_stage1(
+                example.input_record,
+                strictness=strictness,
+                model=model,
+                memory=memory,
+            ).stage1
+            predicted = stage1.decision
+            deterministic_prediction = stage1.metadata.get("deterministic_prediction")
+            model_prediction = stage1.metadata.get("model_prediction")
         predictions.append(
             BenchmarkPrediction(
                 source_id=example.source_id,
                 actual=example.actual,
-                predicted=result.decision,
-                confidence=result.confidence,
+                predicted=predicted,
+                confidence=stage1.confidence,
                 strictness=strictness,
-                finding_codes=tuple(finding.code for finding in result.findings),
-                deterministic_prediction=result.metadata.get("deterministic_prediction"),
-                model_prediction=result.metadata.get("model_prediction"),
+                finding_codes=tuple(finding.code for finding in stage1.findings),
+                deterministic_prediction=deterministic_prediction,
+                model_prediction=model_prediction,
             )
         )
 
