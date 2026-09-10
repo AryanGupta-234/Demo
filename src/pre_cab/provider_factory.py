@@ -3,8 +3,8 @@ import os
 
 from .budget import BudgetGuard
 from .budgeted_provider import BudgetedProvider
-from .failover_provider import FailoverProvider
 from .huggingface import HuggingFaceGPTOSS120B
+from .model_router import GPTOSS120BRouter
 from .models import GroqGPTOSS120B, ModelProvider
 
 
@@ -21,7 +21,7 @@ def _raw_provider(name: str) -> ModelProvider:
             providers.append(HuggingFaceGPTOSS120B())
         if not providers:
             raise RuntimeError("Set GROQ_API_KEY and/or HF_TOKEN for GPT-OSS 120B inference")
-        return FailoverProvider(providers)
+        return GPTOSS120BRouter(providers)
     raise ValueError(f"Unsupported provider: {name}")
 
 
