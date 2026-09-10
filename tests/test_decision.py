@@ -31,7 +31,7 @@ def test_backout_backup_is_accepted():
 def test_uat_is_contextual_for_infrastructure_patch():
     cr = base_cr(
         Category="Infrastructure",
-        Short_description="" if False else "Monthly OS security patching",
+        **{"Short description": "Monthly OS security patching"},
         Description="Monthly OS security patching and server reboot.",
         Justification="Remediate operating system vulnerabilities.",
     )
@@ -40,7 +40,7 @@ def test_uat_is_contextual_for_infrastructure_patch():
 
 
 def test_functional_change_can_require_uat():
-    cr = base_cr(Category="Debit Card", Sub_Category="ATM Transactions")
+    cr = base_cr(**{"Category": "Debit Card", "Sub Category": "ATM Transactions"})
     required, _ = infer_uat_requirement(cr)
     assert required is True
 
