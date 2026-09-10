@@ -24,6 +24,13 @@ Model-independent proof of concept for validating **Normal** ServiceNow Change R
 5. The benchmark phase measures GPT-OSS 120B capability before any fine-tuning so improvements remain measurable.
 6. Sensitive production data should not be committed to this public demo repository. Use synthetic data for demonstrations.
 7. The reasoning brain explicitly separates observed facts, inferences, uncertainties, contradictions and recommendations, and performs a self-critique pass before a recommendation.
+8. Free-tier mode spends model calls only on high-value reasoning; deterministic agents, retrieval, parsing and policy checks run locally first.
+
+## Free-tier development mode
+
+The current V1 is designed around Groq's current free-plan limits for `openai/gpt-oss-120b`: 30 requests/minute, 1,000 requests/day, 8K tokens/minute, and 200K tokens/day. The code therefore budgets one bounded synthesis call per CR and requires retrieval/compaction before sending oversized context. See `src/pre_cab/budget.py`.
+
+The model adapter uses GPT-OSS 120B reasoning mode and structured JSON-schema output. This gives the agents a stable machine-readable contract while keeping the model replaceable later.
 
 ## Current API
 
