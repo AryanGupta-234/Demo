@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pre-CAB Validator</title>
+  <style>
+    body{font-family:Inter,system-ui,sans-serif;margin:0;background:#0b1020;color:#e8ecf4}
+    .wrap{max-width:1180px;margin:32px auto;padding:0 20px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+    .card{background:#121a2d;border:1px solid #25314b;border-radius:14px;padding:18px}
+    textarea{width:100%;box-sizing:border-box;min-height:430px;background:#0a0f1c;color:#dfe8ff;border:1px solid #34415e;border-radius:10px;padding:12px;font-family:ui-monospace,monospace}
+    select,button{padding:10px 12px;border-radius:9px;border:1px solid #394867;background:#18233b;color:#fff}
+    button{cursor:pointer}
+    .status{font-size:28px;font-weight:700;margin-bottom:8px}.muted{color:#98a5bd}
+    pre{white-space:pre-wrap;max-height:520px;overflow:auto}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pre-CAB Validator</h1>
+  <p class="muted">Normal CR proof-of-concept • CAB view + technical analysis • Stage 1 + evidence gate</p>
+  <div class="card" style="margin-bottom:18px">
+    <label>Strictness&nbsp;</label>
+    <select id="strictness"><option value="balanced">Balanced</option><option value="lenient">Lenient</option><option value="strict">Strict</option></select>
+    <button id="run">Validate CR</button>
+  </div>
+  <div class="grid">
+    <div class="card"><h2>CR JSON</h2><textarea id="cr"></textarea></div>
+    <div class="card"><h2>Result</h2><div id="result" class="muted">Run a validation to see the CAB decision.</div></div>
+  </div>
+</div>
+<script>
+const example={Number:'CHG-DEMO-002',Type:'Normal',"Short description":'ATM transaction enhancement',Description:'Deploy a functional fix for ATM transaction fee recovery.',Justification:'Prevent transaction fee recovery failures and manual intervention.',Category:'Debit Card',"Sub Category":'ATM Transactions',"Implementation plan":'Back up the current application artifact, deploy the fixed artifact, restart the service, and run validation.',"Backout plan":'Restore the backed-up application artifact and restart the service.',"Test plan":'Execute functional scenarios in UAT and verify successful fee recovery.',"Test Results Evidence":'Yes',"UAT signoff":'Completed',Risk:'Moderate',"Risk and impact analysis":'Customer-facing transaction behavior may change.',"Configuration item":'demo-atm-prod',"Customer Approval":'Yes',"Conflict status":'No Conflict'};
+document.getElementById('cr').value=JSON.stringify(example,null,2);
+document.getElementById('run').onclick=async()=>{
+  const result=document.getElementById('result'); result.textContent='Validating…';
+  try{
+    const cr=JSON.parse(document.getElementById('cr').value);
+    const res=await fetch('/v1/pre-cab/validate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({strictness:document.getElementById('strictness').value,cr})});
+    const data=await res.json();
+    if(data.error){result.textContent=data.error;return;}
+    result.innerHTML=`<div class="status">${data.decision}</div><div>Confidence: ${data.confidence}</div><hr><h3>CAB view</h3><pre>${escapeHtml(JSON.stringify(data.cab_view,null,2))}</pre><h3>Technical view</h3><pre>${escapeHtml(JSON.stringify(data.technical_view,null,2))}</pre>`;
+  }catch(e){result.textContent='Invalid JSON or API error: '+e.message}
+};
+function escapeHtml(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+</script>
+</body></html>
