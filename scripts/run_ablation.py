@@ -8,6 +8,7 @@ from pathlib import Path
 from pre_cab.benchmark_ablation import run_ablation
 from pre_cab.benchmark_manifest import build_manifest
 from pre_cab.benchmark_prepare import prepare_normal_benchmark
+from pre_cab.input_loader import load_cr_records
 from pre_cab.provider_factory import build_provider
 from pre_cab.schemas import Strictness
 
@@ -25,10 +26,10 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, default=Path("artifacts/ablation_manifest.json"))
     args = parser.parse_args()
 
-    records = json.loads(args.input.read_text(encoding="utf-8"))
-    if not isinstance(records, list):
-        raise SystemExit("Input must be a JSON list of ServiceNow CR records")
+    records = load_cr_records(args.input)
     examples = [e for e in prepare_normal_benchmark(records) if e.actual is not None]
+    if not examples:
+        raise SystemExit("No scorable Normal CR examples were found in the supplied export.")
     if args.limit > 0 and args.limit < len(examples):
         rng = random.Random(args.seed)
         rng.shuffle(examples)
