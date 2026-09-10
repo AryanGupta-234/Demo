@@ -101,9 +101,11 @@ def verify_attachments(
         if document.metadata.get("requires_vision") and not document.text.strip():
             findings.append(Finding("EVIDENCE_UNREADABLE", "Image evidence requires visual review", FindingSeverity.WARNING, f"Attachment {document.name} is image-based and has no extracted text.", evidence_refs=(document.ref,)))
 
-    if any("dev-only" in _norm(d.text) for d in relevant) and _norm(cr.get("Environment")) in {"prod", "production"}:
-        contradictions.append("Attachment indicates DEV-only validation while the CR targets production.")
-        findings.append(Finding("EVIDENCE_TEST_ENV_MISMATCH", "Testing environment mismatch", FindingSeverity.BLOCKING, "Evidence indicates DEV-only validation while the CR targets production.", recommendation="Provide production-equivalent validation evidence or resolve the environment mismatch before CAB."))
+    dev_only = any("dev-only" in _norm(d.text) or "dev testing" in _norm(d.text) for d in relevant)
+    prod_target = _norm(cr.get("Environment")) in {"prod", "production"}
+    if dev_only and (prod_target or test_required):
+        contradictions.append("Attachment indicates DEV-only validation while the CR requires UAT or targets production.")
+        findings.append(Finding("EVIDENCE_TEST_ENV_MISMATCH", "Testing environment mismatch", FindingSeverity.BLOCKING, "Evidence indicates DEV-only validation while the CR requires UAT or targets production.", recommendation="Provide UAT/production-equivalent validation evidence or resolve the environment mismatch before CAB."))
 
     if any(f.severity == FindingSeverity.BLOCKING for f in findings):
         decision = Decision.NOT_READY
