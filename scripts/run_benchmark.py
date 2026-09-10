@@ -5,6 +5,7 @@ import json
 import random
 from pathlib import Path
 
+from pre_cab.benchmark_manifest import build_manifest
 from pre_cab.benchmark_prepare import prepare_normal_benchmark
 from pre_cab.benchmark_runner import run_benchmark, strictness_sweep
 from pre_cab.provider_factory import build_provider
@@ -29,6 +30,7 @@ def main() -> None:
     parser.add_argument("--sweep", action="store_true", help="Evaluate all strictness profiles")
     parser.add_argument("--llm", action="store_true", help="Use configured GPT-OSS 120B provider")
     parser.add_argument("--provider", choices=["auto", "groq", "huggingface"], default="auto")
+    parser.add_argument("--manifest", type=Path, default=Path("artifacts/benchmark_manifest.json"))
     parser.add_argument("--output", type=Path, default=Path("artifacts/benchmark_report.json"))
     args = parser.parse_args()
 
@@ -48,10 +50,21 @@ def main() -> None:
         payload = report.to_dict()
         console = payload["metrics"]
 
+    manifest = build_manifest(
+        records,
+        seed=args.seed,
+        strictness="sweep" if args.sweep else args.strictness,
+        limit=args.limit,
+        provider=args.provider,
+        llm_enabled=args.llm,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    args.manifest.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(console, indent=2))
     print(f"Full benchmark report written to {args.output}")
+    print(f"Reproducibility manifest written to {args.manifest}")
 
 
 if __name__ == "__main__":
