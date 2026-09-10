@@ -32,25 +32,51 @@ class FieldAgent(BaseAgent):
     name = "field"
 
     def run(self, context: AgentContext) -> AgentResult:
-        from .decision import validate_fields
-        result = validate_fields(context.cr, context.strictness)
-        return AgentResult(self.name, result.findings, [r.__dict__ for r in result.requirements], {"score": result.score})
+        # The orchestrator already owns the deterministic field validation result. Re-running it here
+        # would duplicate every warning/blocker in the merged result, so this agent contributes only
+        # a typed audit note.
+        populated = sum(value not in (None, "", [], {}) for value in context.cr.values())
+        return AgentResult(
+            self.name,
+            [],
+            [],
+            {"field_count": len(context.cr), "populated_fields": populated, "validator_owned_by_orchestrator": True},
+        )
 
 
 class ContextAgent(BaseAgent):
     name = "context"
 
     def run(self, context: AgentContext) -> AgentResult:
-        from .decision import infer_uat_requirement
-        required, reason = infer_uat_requirement(context.cr)
-        finding = Finding(
-            code="UAT_REQUIREMENT",
-            title="Contextual testing requirement",
-            severity=FindingSeverity.INFO,
-            message=("UAT is contextually expected." if required else "UAT is not assumed mandatory."),
-            technical_detail=reason,
+        from .requirements import infer_requirements
+        predictions = infer_requirements(context.cr)
+        findings = [
+            Finding(
+                code="CONTEXT_REQUIREMENTS",
+                title="Contextual requirements inferred",
+                severity=FindingSeverity.INFO,
+                message="Change-specific validation requirements were inferred from the CR context.",
+                technical_detail="; ".join(
+                    f"{prediction.name}={prediction.required} ({prediction.confidence:.2f})"
+                    for prediction in predictions
+                ),
+            )
+        ]
+        return AgentResult(
+            self.name,
+            findings,
+            [
+                {
+                    "name": prediction.name,
+                    "required": prediction.required,
+                    "confidence": prediction.confidence,
+                    "reason": prediction.reason,
+                    "signals": list(prediction.signals),
+                }
+                for prediction in predictions
+            ],
+            {},
         )
-        return AgentResult(self.name, [finding], [{"name": "UAT", "required": required, "reason": reason}], {})
 
 
 class TechnicalAgent(BaseAgent):
@@ -58,14 +84,21 @@ class TechnicalAgent(BaseAgent):
 
     def run(self, context: AgentContext) -> AgentResult:
         implementation = str(context.cr.get("Implementation plan") or "").strip()
+        backout = str(context.cr.get("Backout plan") or "").strip()
+        ci = str(context.cr.get("Configuration item") or "").strip()
         finding = Finding(
             code="TECH_SCOPE",
             title="Technical scope extracted",
             severity=FindingSeverity.INFO,
             message="Technical implementation scope has been captured for deeper review.",
-            technical_detail=implementation[:4000],
+            technical_detail=(f"CI={ci!r}; implementation={implementation[:2500]}; backout={backout[:1500]}"),
         )
-        return AgentResult(self.name, [finding], [], {"implementation_length": len(implementation)})
+        return AgentResult(
+            self.name,
+            [finding],
+            [],
+            {"implementation_length": len(implementation), "backout_length": len(backout), "ci": ci},
+        )
 
 
 class BusinessImpactAgent(BaseAgent):
@@ -73,25 +106,25 @@ class BusinessImpactAgent(BaseAgent):
 
     def run(self, context: AgentContext) -> AgentResult:
         cr = context.cr
-        fields = {
-            "customer": cr.get("Customer"),
-            "affected_customers": cr.get("Affected Customers"),
-            "business_service": cr.get("Business service"),
-            "description": cr.get("Description"),
-        }
+        description = " ".join(
+            str(cr.get(field) or "")
+            for field in ("Short description", "Description", "Justification", "Risk and impact analysis")
+        ).lower()
         customer_visible = any(
-            term in str(fields.get("description") or "").lower()
-            for term in ("customer", "user", "transaction", "sms", "payment", "service")
+            term in description
+            for term in ("customer", "user", "transaction", "sms", "payment", "service unavailable", "outage")
         )
-        severity = FindingSeverity.INFO
-        message = "No explicit customer/business impact finding was raised at Stage 1."
-        if customer_visible or fields["customer"] or fields["affected_customers"]:
-            message = "Potential customer/business impact was detected and will be reasoned over."
+        explicit_customer = bool(cr.get("Customer") or cr.get("Affected Customers"))
+        message = (
+            "Potential customer/business impact was detected and requires CAB consideration."
+            if customer_visible or explicit_customer
+            else "No strong customer/business impact signal was found in the supplied fields."
+        )
         return AgentResult(
             self.name,
-            [Finding("BUSINESS_IMPACT", "Business impact assessed", severity, message, technical_detail=str(fields))],
+            [Finding("BUSINESS_IMPACT", "Business impact assessed", FindingSeverity.INFO, message, technical_detail=description[:3000])],
             [],
-            {"customer_visible_signal": customer_visible},
+            {"customer_visible_signal": customer_visible, "explicit_customer_reference": explicit_customer},
         )
 
 
@@ -101,7 +134,7 @@ class MemoryAgent(BaseAgent):
     def run(self, context: AgentContext) -> AgentResult:
         if not self.memory:
             return AgentResult(self.name, [], [], {"matches": []})
-        query = " ".join(str(context.cr.get(k) or "") for k in ("Short description", "Description", "Category", "Sub Category"))
+        query = " ".join(str(context.cr.get(k) or "") for k in ("Short description", "Description", "Category", "Sub Category", "Configuration item"))
         matches = self.memory.search(query, kinds=[MemoryKind.CAB_HISTORY, MemoryKind.SIMILARITY, MemoryKind.POLICY], limit=8)
         return AgentResult(self.name, [], [], {"matches": [m.__dict__ for m in matches]})
 
@@ -110,8 +143,9 @@ class TestingAgent(BaseAgent):
     name = "testing"
 
     def run(self, context: AgentContext) -> AgentResult:
-        from .decision import infer_uat_requirement
-        required, reason = infer_uat_requirement(context.cr)
+        from .requirements import infer_requirements
+        predictions = infer_requirements(context.cr)
+        uat = next((prediction for prediction in predictions if prediction.name == "UAT"), None)
         test_plan = str(context.cr.get("Test plan") or "").strip()
         evidence = str(context.cr.get("Test Results Evidence") or "").strip()
         findings: list[Finding] = []
@@ -128,9 +162,17 @@ class TestingAgent(BaseAgent):
             title="Testing requirement assessed",
             severity=FindingSeverity.INFO,
             message="Testing requirement was inferred from the CR context.",
-            technical_detail=f"UAT required={required}; {reason}; evidence field={evidence!r}",
+            technical_detail=(
+                f"UAT required={uat.required if uat else False}; "
+                f"{uat.reason if uat else 'no UAT prediction'}; evidence field={evidence!r}"
+            ),
         ))
-        return AgentResult(self.name, findings, [{"name": "UAT", "required": required, "reason": reason}], {})
+        return AgentResult(
+            self.name,
+            findings,
+            ([{"name": "UAT", "required": uat.required, "reason": uat.reason}] if uat else []),
+            {},
+        )
 
 
 class RiskAgent(BaseAgent):
@@ -176,19 +218,53 @@ class CloneAgent(BaseAgent):
     name = "clone"
 
     def run(self, context: AgentContext) -> AgentResult:
-        matches = []
-        if self.memory:
-            query = " ".join(str(context.cr.get(k) or "") for k in ("Short description", "Description", "Category", "Sub Category"))
-            matches = self.memory.search(query, kinds=[MemoryKind.CAB_HISTORY, MemoryKind.SIMILARITY], limit=5)
-        return AgentResult(self.name, [], [], {"clone_candidates": [m.__dict__ for m in matches]})
+        if not self.memory:
+            return AgentResult(self.name, [], [], {"clone_candidates": []})
+        from .clone import clone_analysis
+
+        query = " ".join(
+            str(context.cr.get(k) or "")
+            for k in ("Short description", "Description", "Category", "Sub Category", "Configuration item")
+        )
+        matches = self.memory.search(query, kinds=[MemoryKind.CAB_HISTORY, MemoryKind.SIMILARITY], limit=8)
+        analyses: list[dict[str, Any]] = []
+        findings: list[Finding] = []
+        for match in matches:
+            historical = match.metadata.get("source_record") if isinstance(match.metadata, dict) else None
+            if not isinstance(historical, dict):
+                continue
+            analysis = clone_analysis(context.cr, historical)
+            item = {
+                "change_id": analysis.candidate.change_id,
+                "similarity": analysis.candidate.similarity,
+                "historical_decision": analysis.candidate.historical_decision,
+                "cab_recommendation": analysis.candidate.cab_recommendation,
+                "reusable_fields": list(analysis.reusable_fields),
+                "changed_fields": list(analysis.changed_fields),
+                "revalidation_fields": list(analysis.revalidation_fields),
+                "recommendation": analysis.recommendation,
+            }
+            analyses.append(item)
+        analyses.sort(key=lambda item: item["similarity"], reverse=True)
+        strong = next((item for item in analyses if item["recommendation"] == "CLONE_CANDIDATE"), None)
+        if strong:
+            findings.append(
+                Finding(
+                    code="CLONE_CANDIDATE_FOUND",
+                    title="Strong historical clone candidate found",
+                    severity=FindingSeverity.INFO,
+                    message=f"A {strong['similarity']:.0%} similar historical Normal CR was found.",
+                    technical_detail=f"Historical CR={strong['change_id']}; changed fields={strong['changed_fields']}",
+                    recommendation="Reuse only the stable structure and revalidate every changed field/evidence item.",
+                )
+            )
+        return AgentResult(self.name, findings, [], {"clone_candidates": analyses[:5]})
 
 
 class DecisionAgent(BaseAgent):
     name = "decision"
 
     def run(self, context: AgentContext) -> AgentResult:
-        # The shared AgenticReasoningLoop is the sole generative pass. This agent exposes the
-        # deterministic boundary rather than making a second, redundant model call.
         return AgentResult(
             self.name,
             [Finding(
