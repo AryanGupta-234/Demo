@@ -32,9 +32,6 @@ class FieldAgent(BaseAgent):
     name = "field"
 
     def run(self, context: AgentContext) -> AgentResult:
-        # The orchestrator already owns the deterministic field validation result. Re-running it here
-        # would duplicate every warning/blocker in the merged result, so this agent contributes only
-        # a typed audit note.
         populated = sum(value not in (None, "", [], {}) for value in context.cr.values())
         return AgentResult(
             self.name,
@@ -237,15 +234,16 @@ class CloneAgent(BaseAgent):
             item = {
                 "change_id": analysis.candidate.change_id,
                 "similarity": analysis.candidate.similarity,
-                "historical_decision": analysis.candidate.historical_decision,
+                "historical_decision": match.metadata.get("historical_outcome") or analysis.candidate.historical_decision,
                 "cab_recommendation": analysis.candidate.cab_recommendation,
                 "reusable_fields": list(analysis.reusable_fields),
                 "changed_fields": list(analysis.changed_fields),
                 "revalidation_fields": list(analysis.revalidation_fields),
                 "recommendation": analysis.recommendation,
+                "retrieval_score": match.score,
             }
             analyses.append(item)
-        analyses.sort(key=lambda item: item["similarity"], reverse=True)
+        analyses.sort(key=lambda item: (item["similarity"], item.get("retrieval_score") or 0), reverse=True)
         strong = next((item for item in analyses if item["recommendation"] == "CLONE_CANDIDATE"), None)
         if strong:
             findings.append(
