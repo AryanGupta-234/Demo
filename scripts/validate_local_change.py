@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from pre_cab.audit_store import SQLiteAuditStore
+from pre_cab.input_loader import load_cr_records, normalize_cr_record, source_id
 from pre_cab.persistent_memory import SQLiteUnifiedMemory
 from pre_cab.pipeline import run_pre_cab
 from pre_cab.provider_factory import build_provider
@@ -14,7 +15,7 @@ from pre_cab.schemas import Strictness
 
 def _find_cr(records: list[dict], number: str) -> dict:
     for row in records:
-        candidate = str(row.get("Number") or row.get("Effective number") or "").strip()
+        candidate = source_id(row)
         if candidate.lower() == number.lower():
             return row
     raise KeyError(f"CR not found: {number}")
@@ -32,10 +33,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
-    records = json.loads(args.input.read_text(encoding="utf-8"))
-    if not isinstance(records, list):
-        raise SystemExit("Input must contain a JSON list")
-    cr = _find_cr(records, args.number)
+    try:
+        records = load_cr_records(args.input)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Unable to load CR JSON: {exc}") from exc
+    cr = normalize_cr_record(_find_cr(records, args.number))
     memory = SQLiteUnifiedMemory(args.memory_db) if args.memory_db else None
     model = build_provider(args.provider) if args.llm else None
     strictness = Strictness(args.strictness)

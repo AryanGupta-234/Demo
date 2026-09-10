@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from .input_loader import normalize_cr_record, record_type, source_id
+from .orchestrator import run_stage1
 from .pipeline import run_pre_cab
 from .schemas import Strictness
 
@@ -19,7 +21,8 @@ class BatchProgress:
 
 
 def _cr_id(cr: dict[str, Any]) -> str:
-    return str(cr.get("Number") or cr.get("Effective number") or "").strip()
+    value = source_id(cr)
+    return "" if value.lower() == "unknown" else value
 
 
 def completed_ids(path: Path) -> set[str]:
@@ -46,6 +49,7 @@ def run_batch(
     model: Any = None,
     memory: Any = None,
     attachment_root: str | Path | None = None,
+    stage1_only: bool = False,
     normal_only: bool = True,
     resume: bool = True,
 ) -> BatchProgress:
@@ -61,39 +65,57 @@ def run_batch(
     processed = skipped = failed = 0
 
     with output.open(mode, encoding="utf-8") as handle:
-        for cr in records:
+        for original in records:
+            cr = normalize_cr_record(original)
             number = _cr_id(cr)
-            if normal_only and str(cr.get("Type") or "").strip().lower() != "normal":
+            if normal_only and record_type(cr) != "normal":
                 skipped += 1
                 continue
             if not number or number in done:
                 skipped += 1
                 continue
             try:
-                result = run_pre_cab(
-                    cr,
-                    attachment_root=attachment_root,
-                    strictness=strictness,
-                    model=model,
-                    memory=memory,
-                )
-                row = {
-                    "cr_number": number,
-                    "ok": True,
-                    "stage1_decision": result.stage1.decision.value,
-                    "stage2_decision": result.stage2.decision.value if result.stage2 else None,
-                    "final_decision": result.final_decision.value,
-                    "confidence": result.stage1.confidence,
-                    "finding_codes": [finding.code for finding in result.stage1.findings]
-                    + ([finding.code for finding in result.stage2.findings] if result.stage2 else []),
-                    "documents_analyzed": len(result.documents),
-                    "model_prediction": (
-                        result.final_reasoning.model_prediction.value
-                        if result.final_reasoning and result.final_reasoning.model_prediction
-                        else None
-                    ),
-                    "model_error": result.final_reasoning.error if result.final_reasoning else None,
-                }
+                if stage1_only:
+                    result = run_stage1(cr, strictness=strictness, model=model, memory=memory).stage1
+                    row = {
+                        "cr_number": number,
+                        "ok": True,
+                        "validation_mode": "metadata_only",
+                        "stage1_decision": result.decision.value,
+                        "stage2_decision": None,
+                        "final_decision": result.decision.value,
+                        "confidence": result.confidence,
+                        "finding_codes": [finding.code for finding in result.findings],
+                        "documents_analyzed": 0,
+                        "model_prediction": result.metadata.get("model_prediction"),
+                        "model_error": result.metadata.get("model_error"),
+                    }
+                else:
+                    result = run_pre_cab(
+                        cr,
+                        attachment_root=attachment_root,
+                        strictness=strictness,
+                        model=model,
+                        memory=memory,
+                    )
+                    row = {
+                        "cr_number": number,
+                        "ok": True,
+                        "validation_mode": "evidence_aware",
+                        "stage1_decision": result.stage1.decision.value,
+                        "stage2_decision": result.stage2.decision.value if result.stage2 else None,
+                        "final_decision": result.final_decision.value,
+                        "confidence": result.stage1.confidence,
+                        "finding_codes": [finding.code for finding in result.stage1.findings]
+                        + ([finding.code for finding in result.stage2.findings] if result.stage2 else []),
+                        "documents_analyzed": len(result.documents),
+                        "model_prediction": (
+                            result.final_reasoning.model_prediction.value
+                            if result.final_reasoning and result.final_reasoning.model_prediction
+                            else None
+                        ),
+                        "model_error": result.final_reasoning.error if result.final_reasoning else None,
+                    }
                 processed += 1
             except Exception as exc:  # batch boundary must checkpoint a failure rather than lose the run
                 row = {
@@ -104,5 +126,7 @@ def run_batch(
                 failed += 1
             handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
             handle.flush()
+            # Avoid processing duplicate CR numbers that occur later in one export.
+            done.add(number)
 
     return BatchProgress(processed, skipped, failed, str(output))

@@ -27,7 +27,8 @@ def _find_records(payload: Any) -> list[dict[str, Any]] | None:
 def load_cr_records(path: str | Path) -> list[dict[str, Any]]:
     """Load CR records from bare lists or nested ServiceNow/export envelopes."""
     source = Path(path)
-    payload = json.loads(source.read_text(encoding="utf-8"))
+    # ``utf-8-sig`` also accepts exports saved by Excel/Windows tools with a BOM.
+    payload = json.loads(source.read_text(encoding="utf-8-sig"))
     records = _find_records(payload)
     if records is None:
         raise ValueError("Input JSON does not contain CR records as a list or nested export envelope")
@@ -44,11 +45,46 @@ def first_value(record: dict[str, Any], *names: str) -> Any:
     return None
 
 
+def normalize_cr_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy with the validator's canonical CR keys populated.
+
+    ServiceNow JSON exports commonly vary only by case, spaces, underscores, or
+    their display label.  Keeping the original fields while adding these aliases
+    lets the deterministic rules operate consistently without tying the local
+    JSON workflow to a particular export or API format.
+    """
+    normalized = dict(record)
+    aliases = {
+        "Number": ("Number", "Effective number", "Change Number", "change_number", "sys_id"),
+        "Type": ("Type", "Change type", "change_type", "Change class", "change_class"),
+        "Short description": ("Short description", "short_description", "Summary", "Title"),
+        "Description": ("Description", "description", "Details"),
+        "Justification": ("Justification", "Business justification", "business_justification"),
+        "Implementation plan": ("Implementation plan", "Implementation", "implementation_plan", "Plan"),
+        "Backout plan": ("Backout plan", "Rollback plan", "backout_plan", "rollback_plan"),
+        "Test plan": ("Test plan", "test_plan", "Testing plan"),
+        "Test Results Evidence": ("Test Results Evidence", "Test results", "test_results_evidence"),
+        "UAT signoff": ("UAT signoff", "UAT", "uat_signoff", "UAT approval"),
+        "Customer Approval": ("Customer Approval", "customer_approval", "Customer signoff"),
+        "Risk": ("Risk", "Risk level", "risk_level"),
+        "Risk and impact analysis": ("Risk and impact analysis", "Impact analysis", "risk_impact_analysis"),
+        "Configuration item": ("Configuration item", "Configuration Item", "CI", "cmdb_ci"),
+        "Category": ("Category", "category"),
+        "Sub Category": ("Sub Category", "Subcategory", "sub_category", "subcategory"),
+        "Conflict status": ("Conflict status", "Conflict Status", "conflict_status"),
+    }
+    for canonical, names in aliases.items():
+        value = first_value(record, *names)
+        if value is not None:
+            normalized[canonical] = value
+    return normalized
+
+
 def record_type(record: dict[str, Any]) -> str:
     value = first_value(record, "Type", "change type", "change_type", "type")
     return str(value or "").strip().lower()
 
 
 def source_id(record: dict[str, Any]) -> str:
-    value = first_value(record, "Number", "Effective number", "number", "effective_number", "Change Number", "change_number")
+    value = first_value(record, "Number", "Effective number", "number", "effective_number", "Change Number", "change_number", "sys_id")
     return str(value or "unknown")

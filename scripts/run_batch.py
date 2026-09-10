@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from pre_cab.batch import run_batch
+from pre_cab.input_loader import load_cr_records
 from pre_cab.provider_factory import build_provider
 from pre_cab.schemas import Strictness
 
@@ -18,19 +19,28 @@ def main() -> None:
     parser.add_argument("--llm", action="store_true")
     parser.add_argument("--provider", choices=["auto", "groq", "huggingface"], default="auto")
     parser.add_argument("--restart", action="store_true", help="Overwrite prior checkpoint instead of resuming")
+    parser.add_argument("--include-non-normal", action="store_true", help="Process every change type (Normal only is the default)")
+    parser.add_argument(
+        "--full-validation",
+        action="store_true",
+        help="Run attachment evidence validation; metadata-only screening is used when no attachments are supplied.",
+    )
     args = parser.parse_args()
 
-    records = json.loads(args.input.read_text(encoding="utf-8"))
-    if not isinstance(records, list):
-        raise SystemExit("Input must contain a JSON list of CR records")
+    try:
+        records = load_cr_records(args.input)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Unable to load CR JSON: {exc}") from exc
 
     model = build_provider(args.provider) if args.llm else None
     progress = run_batch(
         records,
         output_path=args.output,
         attachment_root=args.attachments,
+        stage1_only=not args.full_validation and args.attachments is None,
         strictness=Strictness(args.strictness),
         model=model,
+        normal_only=not args.include_non_normal,
         resume=not args.restart,
     )
     print(json.dumps(progress.__dict__, indent=2))

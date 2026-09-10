@@ -62,7 +62,42 @@ python main.py "C:\path\to\one_cr.json" --provider groq
 - Attachment analysis is a second-stage gate: claims in the CR are checked against supporting documents.
 - Final decisions are `PASS`, `CONDITIONAL`, or `NOT_READY`; the LLM provides reasoning, while deterministic policy gates protect critical approval logic.
 
-## Ingestion boundary
+## Use local CR JSON now
+
+The current workflow is deliberately local and API-free: provide one JSON export containing your
+CRs, including an export of roughly 5,000 records. The batch runner processes one record at a
+time, writes each result immediately as JSONL, and resumes safely after interruption. It does not
+call ServiceNow and does not require an attachment folder. Without attachments it performs
+metadata-only (Stage 1) screening, so missing documents do not incorrectly make every CR
+`NOT_READY`.
+
+```text
+python scripts/run_batch.py path/to/cr_export.json --output artifacts/cr_results.jsonl
+```
+
+Supported JSON shapes are a top-level list or a nested export envelope such as
+`{"result": [...]}`, `{"records": [...]}`, `{"data": [...]}`, or `{"items": [...]}`. UTF-8
+files with or without a BOM are supported. Common field variants such as `change_number`,
+`short_description`, `implementation_plan`, `rollback_plan`, `cmdb_ci`, and `risk_level` are
+normalized automatically; original fields are preserved.
+
+Only Normal changes are validated by default. Each output line contains the CR number, decisions,
+confidence, finding codes, document count, and any per-record error. Re-run the same command to
+skip completed CRs. Use `--restart` to recreate the output from scratch, or
+`--include-non-normal` only if you intentionally want to run unsupported change types.
+
+To validate one CR from the same export:
+
+```text
+python scripts/validate_local_change.py path/to/cr_export.json CHG001234
+```
+
+Attachments are optional for this phase. When you later provide the upstream file-management
+script, pass its prepared CR workspace with `--attachments <workspace>`; no API integration work
+is needed in this repository for the local-JSON workflow. Add `--full-validation` if you want
+evidence-aware Stage 2 validation (it is enabled automatically when `--attachments` is supplied).
+
+## Future ingestion boundary
 
 The validator does **not** own the ServiceNow bulk-fetch or attachment-download workflow. The first integration layer is expected to fetch the CRs from ServiceNow and create the local CR workspace. Your existing API/file-management script can be used as that upstream input layer.
 
