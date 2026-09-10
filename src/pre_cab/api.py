@@ -1,7 +1,7 @@
 """Optional FastAPI surface for the Pre-CAB engine.
 
-The API accepts both CR fields and extracted attachment records so Stage 2 can independently
-verify claims made in ServiceNow fields. Authentication/deployment concerns remain outside the core.
+The API accepts CR fields and extracted attachment records. The response exposes the true final
+readiness after deterministic validation, evidence verification and optional GPT-OSS reasoning.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def create_app(*, model: Any = None, memory: Any = None) -> Any:
     except ImportError as exc:
         raise RuntimeError("Install the 'api' extra to run the HTTP interface") from exc
 
-    app = FastAPI(title="Pre-CAB Validator", version="0.3.0")
+    app = FastAPI(title="Pre-CAB Validator", version="0.5.0")
 
     @app.get("/")
     def home() -> Any:
@@ -72,7 +72,25 @@ def create_app(*, model: Any = None, memory: Any = None) -> Any:
             memory=memory,
         )
         report = build_report(result.stage1, stage2=result.stage2)
+        report["stage1_decision"] = result.stage1.decision.value
+        report["final_decision"] = result.final_decision.value
+        report["decision"] = result.final_decision.value
         report["stage2_executed"] = result.stage2 is not None
+        report["documents_analyzed"] = len(result.documents)
+        report["reasoning"] = {
+            "executed": bool(result.final_reasoning and result.final_reasoning.reasoning),
+            "prediction": (
+                result.final_reasoning.model_prediction.value
+                if result.final_reasoning and result.final_reasoning.model_prediction
+                else None
+            ),
+            "error": result.final_reasoning.error if result.final_reasoning else None,
+            "mode": (
+                result.final_reasoning.reasoning.mode
+                if result.final_reasoning and result.final_reasoning.reasoning
+                else "none"
+            ),
+        }
         return report
 
     return app
