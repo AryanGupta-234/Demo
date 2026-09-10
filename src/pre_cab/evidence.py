@@ -45,7 +45,7 @@ def _evidence_strength(text: str) -> str:
     low = text.lower()
     if _contains_any(low, ("expected result", "actual result", "pass", "passed", "test case", "test cases", "execution result")):
         return "strong"
-    if _contains_any(low, ("tested", "testing completed", "uat completed", "uat", "test result")):
+    if _contains_any(low, ("tested", "testing completed", "testing", "uat completed", "uat", "test result")):
         return "medium"
     return "weak"
 
@@ -74,7 +74,16 @@ def verify_attachments(
     reqs = requirements or []
     test_required = any(r.required and r.name.lower() in {"uat", "testing", "test evidence"} for r in reqs)
     test_claim = _norm(cr.get("Test Results Evidence")) in {"yes", "available", "attached"} or bool(str(cr.get("Test plan") or "").strip())
-    test_docs = [d for d in relevant if _contains_any(d.text, ("uat", "test result", "test case", "test evidence", "user acceptance", "execution result"))]
+    test_docs = [
+        d for d in relevant
+        if _contains_any(
+            d.text,
+            (
+                "uat", "test result", "test case", "test evidence", "user acceptance",
+                "execution result", "testing", "tested", "expected result", "actual result",
+            ),
+        )
+    ]
     verified["testing"] = bool(test_docs) if (test_required or test_claim) else True
     if test_required or test_claim:
         if not test_docs:
@@ -101,7 +110,7 @@ def verify_attachments(
 
     customer_required = any(r.required and r.name.lower() == "customer approval" for r in reqs)
     customer_claim = _norm(cr.get("Customer Approval")) in {"yes", "approved"}
-    approval_docs = [d for d in relevant if _contains_any(d.text, ("customer approval", "customer approved", "approved by customer", "customer accepted"))]
+    approval_docs = [d for d in relevant if _contains_any(d.text, ("customer approval", "customer approved", "approved by customer", "customer accepted", "we approve"))]
     verified["customer_approval"] = bool(approval_docs) if (customer_required or customer_claim) else True
     if customer_required or customer_claim:
         if not approval_docs:
@@ -140,12 +149,18 @@ def verify_attachments(
 
     claim_text = f"{cr.get('Test plan', '')} {cr.get('Comments and Work notes', '')}".lower()
     says_uat = "uat" in claim_text
-    dev_only = any("dev" in d.text.lower() and "uat" not in d.text.lower() for d in test_docs)
-    if says_uat and dev_only:
-        contradictions.append("CR references UAT, but a supporting testing document appears to reference DEV only.")
+    dev_only_docs = [
+        d for d in test_docs
+        if _contains_any(d.text, ("dev", "development")) and not _contains_any(d.text, ("uat", "user acceptance"))
+    ]
+    has_uat_doc = any(_contains_any(d.text, ("uat", "user acceptance")) for d in test_docs)
+    if says_uat and dev_only_docs and not has_uat_doc:
+        contradictions.append("Testing environment contradiction: CR references UAT, but available testing evidence references DEV only.")
+        verified["testing"] = False
         findings.append(Finding(
             "EVIDENCE_TEST_ENV_MISMATCH", "Testing environment mismatch", FindingSeverity.BLOCKING,
-            "The CR and supporting testing evidence describe different test environments.",
+            "The CR and available testing evidence describe different test environments.",
+            evidence_refs=tuple(d.ref for d in dev_only_docs),
             recommendation="Resolve the environment mismatch and provide evidence for the claimed environment.",
         ))
 
