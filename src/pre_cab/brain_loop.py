@@ -29,7 +29,7 @@ class ReasoningLoopResult:
 
 
 class AgenticReasoningLoop:
-    """Reason over shared CR context and optionally run an independent critique pass."""
+    """Reason over shared CR/evidence context and optionally run an independent critique pass."""
 
     def __init__(
         self,
@@ -67,10 +67,13 @@ class AgenticReasoningLoop:
         payload = build_reasoning_payload(clean_cr, memories=memories, prior_findings=findings or [])
         payload = sanitize_value(payload)
         payload["strictness"] = context.strictness.value
+        payload["evidence"] = sanitize_value(list(context.evidence or ()))
         payload["self_critique_questions"] = list(self_critique_questions())
         payload["instruction"] = (
-            "Produce the final structured assessment. Challenge your own assumptions inside the "
-            "self_critique field before choosing the prediction. Never invent missing evidence."
+            "Produce the final structured assessment using CR fields, retrieved history/policy, and "
+            "attachment evidence. Challenge your own assumptions inside self_critique before choosing "
+            "the prediction. Never invent missing evidence. Evidence contradictions override unsupported "
+            "CR claims."
         )
 
         initial = self.model.generate(
