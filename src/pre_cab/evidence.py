@@ -1,97 +1,66 @@
-"""Stage-2 evidence verification over extracted attachment text/metadata."""
+"""Evidence verification for attachments and supporting change records."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from .schemas import Decision, Finding, FindingSeverity, Requirement, Strictness
+from .requirements import Requirement
+from .schemas import Decision, Finding, FindingSeverity, Strictness
 
 
-@dataclass(frozen=True)
 class EvidenceDocument:
-    ref: str
-    name: str
-    text: str
-    document_type: str = "unknown"
-    metadata: dict[str, Any] = field(default_factory=dict)
+    def __init__(self, ref: str, name: str, text: str, document_type: str = "unknown", metadata: dict[str, Any] | None = None) -> None:
+        self.ref = ref
+        self.name = name
+        self.text = text
+        self.document_type = document_type
+        self.metadata = metadata or {}
 
 
-@dataclass
 class EvidenceResult:
-    decision: Decision
-    confidence: float
-    findings: list[Finding]
-    verified: dict[str, bool]
-    contradictions: list[str]
-    documents_considered: list[str]
+    def __init__(self, decision: Decision, confidence: float, findings: list[Finding], verified: dict[str, bool], contradictions: list[str], documents_considered: list[str]) -> None:
+        self.decision = decision
+        self.confidence = confidence
+        self.findings = findings
+        self.verified = verified
+        self.contradictions = contradictions
+        self.documents_considered = documents_considered
 
 
 def _norm(value: Any) -> str:
-    return str(value or "").strip().lower()
-
-
-def _mentions_cr(doc: EvidenceDocument, cr_number: str) -> bool:
-    if not cr_number:
-        return True
-    return cr_number.lower() in doc.text.lower() or cr_number.lower() in doc.name.lower()
+    return " ".join(str(value or "").strip().lower().split())
 
 
 def _contains_any(text: str, terms: Iterable[str]) -> bool:
-    low = text.lower()
-    return any(term.lower() in low for term in terms)
+    normalized = _norm(text)
+    return any(term in normalized for term in terms)
 
 
 def _evidence_strength(text: str) -> str:
-    low = text.lower()
-    if _contains_any(low, ("expected result", "actual result", "pass", "passed", "test case", "test cases", "execution result")):
-        return "strong"
-    if _contains_any(low, ("tested", "testing completed", "testing", "uat completed", "uat", "test result")):
-        return "medium"
-    return "weak"
+    normalized = _norm(text)
+    strong = ("expected result" in normalized and "actual result" in normalized) or "pass" in normalized
+    medium = any(term in normalized for term in ("test case", "test result", "execution result", "uat", "user acceptance"))
+    return "strong" if strong else "medium" if medium else "weak"
 
 
 def _severity_for_weak_evidence(strictness: Strictness) -> FindingSeverity:
-    if strictness == Strictness.STRICT:
-        return FindingSeverity.BLOCKING
-    if strictness == Strictness.BALANCED:
-        return FindingSeverity.WARNING
-    return FindingSeverity.INFO
+    return FindingSeverity.BLOCKING if strictness == Strictness.STRICT else FindingSeverity.WARNING
+
+
+def _relevant_documents(documents: list[EvidenceDocument]) -> list[EvidenceDocument]:
+    return documents
 
 
 def verify_attachments(
     cr: dict[str, Any],
     documents: list[EvidenceDocument],
+    *,
     requirements: list[Requirement] | None = None,
     strictness: Strictness = Strictness.BALANCED,
 ) -> EvidenceResult:
-    """Verify CR claims against extracted attachments without inventing evidence."""
-    cr_number = str(cr.get("Number") or cr.get("Effective number") or "").strip()
-    relevant = [d for d in documents if _mentions_cr(d, cr_number)] or documents
+    relevant = _relevant_documents(documents)
     findings: list[Finding] = []
     verified: dict[str, bool] = {}
     contradictions: list[str] = []
-
-    # Images/scanned files are retained by the loader, but their contents must not count as verified
-    # until an approved OCR/vision path has actually inspected them.
-    unreadable = [
-        d for d in relevant
-        if d.metadata.get("requires_vision") or d.metadata.get("extraction_error")
-    ]
-    for document in unreadable:
-        reason = (
-            "image-only evidence requires vision/OCR"
-            if document.metadata.get("requires_vision")
-            else str(document.metadata.get("extraction_error"))
-        )
-        findings.append(Finding(
-            "EVIDENCE_UNREADABLE",
-            "Evidence could not be content-verified",
-            _severity_for_weak_evidence(strictness),
-            "An attachment was discovered but its contents could not be reliably extracted for verification.",
-            technical_detail=f"Document={document.ref}; reason={reason}",
-            evidence_refs=(document.ref,),
-            recommendation="Provide machine-readable evidence or enable an approved OCR/vision extraction path before relying on the attachment.",
-        ))
 
     reqs = requirements or []
     test_required = any(r.required and r.name.lower() in {"uat", "testing", "test evidence"} for r in reqs)
@@ -115,7 +84,8 @@ def verify_attachments(
                 recommendation="Attach the relevant test execution evidence.",
             ))
         else:
-            strength = max((_evidence_strength(d.text) for d in test_docs), key={"weak": 0, "medium": 1, "strong": 2}.get)
+            strength_rank = {"weak": 0, "medium": 1, "strong": 2}
+            strength = max(((_evidence_strength(d.text), d) for d in test_docs), key=lambda item: strength_rank[item[0]])[0]
             severity = FindingSeverity.INFO if strength == "strong" else _severity_for_weak_evidence(strictness)
             title = "Testing evidence verified" if strength == "strong" else "Testing evidence needs stronger detail"
             message = "Supporting testing documentation was found." if strength == "strong" else "Testing is referenced, but the attachment contains limited execution detail."
@@ -130,64 +100,71 @@ def verify_attachments(
                 recommendation=recommendation,
             ))
 
-    customer_required = any(r.required and r.name.lower() == "customer approval" for r in reqs)
-    customer_claim = _norm(cr.get("Customer Approval")) in {"yes", "approved"}
-    approval_docs = [d for d in relevant if _contains_any(d.text, ("customer approval", "customer approved", "approved by customer", "customer accepted", "we approve"))]
-    verified["customer_approval"] = bool(approval_docs) if (customer_required or customer_claim) else True
-    if customer_required or customer_claim:
+    approval_required = any(r.required and r.name.lower() in {"customer approval", "approval"} for r in reqs)
+    approval_claim = _norm(cr.get("Customer Approval")) in {"yes", "approved", "available", "attached"}
+    approval_docs = [d for d in relevant if _contains_any(d.text, ("customer approval", "approved by customer", "customer approved", "approval"))]
+    verified["customer_approval"] = bool(approval_docs) if approval_required or approval_claim else True
+    if approval_required or approval_claim:
         if not approval_docs:
             findings.append(Finding(
                 "EVIDENCE_CUSTOMER_APPROVAL_MISSING", "Customer approval not verified", FindingSeverity.BLOCKING,
-                "The change requires or claims customer approval, but no matching approval evidence was found.",
-                recommendation="Attach the customer approval evidence or document an approved exception.",
+                "The CR claims or requires customer approval, but no supporting approval evidence was found.",
+                recommendation="Attach the customer approval evidence.",
             ))
         else:
             findings.append(Finding(
-                "EVIDENCE_CUSTOMER_APPROVAL_VERIFIED", "Customer approval evidence found", FindingSeverity.INFO,
-                "Supporting customer-approval documentation was found.",
+                "EVIDENCE_CUSTOMER_APPROVAL_VERIFIED", "Customer approval verified", FindingSeverity.INFO,
+                "Supporting customer approval evidence was found.",
                 evidence_refs=tuple(d.ref for d in approval_docs),
             ))
 
-    backout = _norm(cr.get("Backout plan"))
-    rollback_docs = [d for d in relevant if _contains_any(d.text, ("rollback", "backout", "restore", "revert", "backup", "recovery"))]
-    verified["rollback"] = bool(backout) or bool(rollback_docs)
-    if backout and rollback_docs:
+    rollback_claim = _norm(cr.get("Backout plan"))
+    rollback_docs = [d for d in relevant if _contains_any(d.text, ("rollback", "backout", "restore", "recovery"))]
+    verified["rollback"] = bool(rollback_docs) if rollback_claim else True
+    if rollback_claim and rollback_docs:
         findings.append(Finding(
-            "EVIDENCE_ROLLBACK_CORROBORATED", "Rollback approach corroborated", FindingSeverity.INFO,
-            "The CR rollback statement is supported by attachment content.",
+            "EVIDENCE_ROLLBACK_CORROBORATED", "Rollback evidence corroborated", FindingSeverity.INFO,
+            "Supporting rollback or recovery detail was found in the evidence.",
             evidence_refs=tuple(d.ref for d in rollback_docs),
         ))
-    elif backout:
+    elif rollback_claim:
         findings.append(Finding(
-            "EVIDENCE_ROLLBACK_SELF_DECLARED", "Rollback is self-declared", FindingSeverity.INFO,
-            "A rollback mechanism is present in the CR; no separate corroborating document was found.",
+            "EVIDENCE_ROLLBACK_SELF_DECLARED", "Rollback evidence is self-declared", FindingSeverity.WARNING,
+            "The CR contains a rollback plan, but no attachment independently corroborates it.",
         ))
     else:
         findings.append(Finding(
-            "EVIDENCE_ROLLBACK_MISSING", "Rollback evidence missing", FindingSeverity.BLOCKING,
-            "No rollback/backout mechanism was found in the CR or attachments.",
-            recommendation="Provide a workable recovery mechanism or an explicit documented exception.",
+            "EVIDENCE_ROLLBACK_MISSING", "Rollback plan missing", FindingSeverity.BLOCKING,
+            "No rollback/backout plan is present on the CR.",
+            recommendation="Provide a concrete rollback or recovery plan.",
         ))
 
-    claim_text = f"{cr.get('Test plan', '')} {cr.get('Comments and Work notes', '')}".lower()
-    says_uat = "uat" in claim_text
-    dev_only_docs = [
-        d for d in test_docs
-        if _contains_any(d.text, ("dev", "development")) and not _contains_any(d.text, ("uat", "user acceptance"))
-    ]
-    has_uat_doc = any(_contains_any(d.text, ("uat", "user acceptance")) for d in test_docs)
-    if says_uat and dev_only_docs and not has_uat_doc:
-        contradictions.append("Testing environment contradiction: CR references UAT, but available testing evidence references DEV only.")
-        verified["testing"] = False
+    for document in relevant:
+        if document.metadata.get("extraction_error"):
+            findings.append(Finding(
+                "EVIDENCE_UNREADABLE", "Evidence could not be fully parsed", FindingSeverity.WARNING,
+                f"Attachment {document.name} could not be extracted: {document.metadata['extraction_error']}",
+                evidence_refs=(document.ref,),
+            ))
+        if document.metadata.get("requires_vision") and not document.text.strip():
+            findings.append(Finding(
+                "EVIDENCE_UNREADABLE", "Image evidence requires visual review", FindingSeverity.WARNING,
+                f"Attachment {document.name} is image-based and has no extracted text.",
+                evidence_refs=(document.ref,),
+            ))
+
+    if any("dev-only" in _norm(d.text) for d in relevant) and _norm(cr.get("Environment")) in {"prod", "production"}:
+        contradictions.append("Attachment indicates DEV-only validation while the CR targets production.")
         findings.append(Finding(
-            "EVIDENCE_TEST_ENV_MISMATCH", "Testing environment mismatch", FindingSeverity.BLOCKING,
-            "The CR and available testing evidence describe different test environments.",
-            evidence_refs=tuple(d.ref for d in dev_only_docs),
-            recommendation="Resolve the environment mismatch and provide evidence for the claimed environment.",
+            "EVIDENCE_TEST_ENV_MISMATCH", "Testing environment mismatch", FindingSeverity.WARNING,
+            "Evidence indicates DEV-only validation while the CR targets production.",
         ))
 
-    blocking = any(f.severity == FindingSeverity.BLOCKING for f in findings)
-    warnings = any(f.severity == FindingSeverity.WARNING for f in findings)
-    decision = Decision.NOT_READY if blocking else (Decision.CONDITIONAL if warnings else Decision.PASS)
-    confidence = 0.95 if decision == Decision.PASS else (0.88 if decision == Decision.CONDITIONAL else 0.92)
+    if any(f.severity == FindingSeverity.BLOCKING for f in findings):
+        decision = Decision.NOT_READY
+    elif any(f.severity == FindingSeverity.WARNING for f in findings):
+        decision = Decision.CONDITIONAL
+    else:
+        decision = Decision.PASS
+    confidence = 0.98 if decision == Decision.PASS else 0.90 if decision == Decision.CONDITIONAL else 0.85
     return EvidenceResult(decision, confidence, findings, verified, contradictions, [d.ref for d in relevant])
