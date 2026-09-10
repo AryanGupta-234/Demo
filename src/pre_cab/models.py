@@ -23,6 +23,7 @@ class ModelProvider(Protocol):
         user: str,
         temperature: float = 0.1,
         response_format: dict[str, Any] | None = None,
+        reasoning_effort: str = "high",
     ) -> ModelResponse:
         ...
 
@@ -45,7 +46,10 @@ class GroqGPTOSS120B:
         user: str,
         temperature: float = 0.1,
         response_format: dict[str, Any] | None = None,
+        reasoning_effort: str = "high",
     ) -> ModelResponse:
+        if reasoning_effort not in {"low", "medium", "high"}:
+            raise ValueError("reasoning_effort must be low, medium, or high for GPT-OSS 120B")
         try:
             from urllib.request import Request, urlopen
             import json
@@ -57,6 +61,7 @@ class GroqGPTOSS120B:
                     {"role": "user", "content": user},
                 ],
                 "temperature": temperature,
+                "reasoning_effort": reasoning_effort,
             }
             if response_format:
                 payload["response_format"] = response_format
