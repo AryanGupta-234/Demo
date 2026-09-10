@@ -1,6 +1,7 @@
 """Prepare historical Normal CRs for leakage-safe benchmark replay."""
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -25,16 +26,22 @@ def _normalized_key(key: object) -> str:
     return "".join(ch for ch in str(key).strip().lower() if ch.isalnum())
 
 
+def _normalize_type(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().replace("_", " ").replace("-", " ").split())
+
+
 def _is_normal(record: dict[str, Any]) -> bool:
-    value = record_type(record).replace("_", " ").replace("-", " ").strip()
-    if value in {"normal", "normal change"}:
-        return True
+    candidates = [record_type(record)]
     for key, raw in record.items():
         key_text = _normalized_key(key)
-        if any(token in key_text for token in ("changetype", "type", "changeclass", "changeclassification")):
-            normalized = str(raw or "").strip().lower().replace("_", " ").replace("-", " ")
-            if normalized in {"normal", "normal change"} or "normal change" in normalized:
-                return True
+        if "changetype" in key_text or "changeclass" in key_text or "changeclassification" in key_text:
+            candidates.append(str(raw or ""))
+    for candidate in candidates:
+        normalized = _normalize_type(candidate)
+        if normalized in {"normal", "normal change", "normalchange"}:
+            return True
+        if "normal change" in normalized:
+            return True
     return False
 
 
@@ -43,12 +50,13 @@ def _outcome_text(record: dict[str, Any]) -> str:
         record,
         "CAB Outcome", "CAB recommendation", "CAB Recommendation", "cab_outcome", "cab_recommendation",
         "CAB Decision", "CAB Status", "Final CAB Decision", "Final CAB Outcome",
+        "CAB Decision/Recommendation", "CAB Comments", "CAB Comment",
     )
     if direct:
         return direct
     for key, raw in record.items():
         key_text = _normalized_key(key)
-        if "cab" in key_text and any(token in key_text for token in ("outcome", "recommendation", "decision", "status", "result")):
+        if "cab" in key_text and any(token in key_text for token in ("outcome", "recommendation", "decision", "status", "result", "comment")):
             text = str(raw or "").strip().lower()
             if text:
                 return text
@@ -65,15 +73,19 @@ def normalize_outcome(record: dict[str, Any]) -> Decision | None:
         return None
     if any(term in raw for term in (
         "cancellation requested", "request for cancellation", "cancelled as",
-        "cancelled", "cancel", "rejected", "reject", "insufficient information", "hold", "held",
+        "cancelled", "canceled", "cancel", "rejected", "reject", "insufficient information",
+        "not ready", "not approved", "hold", "held", "do not approve", "don't approve",
     )):
         return Decision.NOT_READY
     if any(term in raw for term in (
-        "conditionally approved", "conditional", "condition", "test results reqd",
-        "schedule needs to be updated", "approval pending", "customer approval pending",
+        "conditionally approved", "conditional approval", "conditional", "condition",
+        "test results reqd", "test results required", "schedule needs to be updated",
+        "approval pending", "customer approval pending", "pending approval", "approve with conditions",
     )):
         return Decision.CONDITIONAL
-    if raw in {"approved", "approve", "approvd", "approved."} or raw.startswith("approved "):
+    if any(term in raw for term in (
+        "approved", "approve", "approvd", "approved for implementation", "go ahead", "okay to proceed",
+    )) and not any(term in raw for term in ("not approved", "not approve", "pending approval")):
         return Decision.PASS
     return None
 
@@ -87,8 +99,22 @@ def prepare_normal_benchmark(records: Iterable[dict[str, Any]]) -> list[Benchmar
         hidden = strip_post_decision_fields(dict(original))
         for key in list(hidden):
             key_text = _normalized_key(key)
-            if "cab" in key_text and any(token in key_text for token in ("outcome", "recommendation", "decision", "status", "result")):
+            if "cab" in key_text and any(token in key_text for token in ("outcome", "recommendation", "decision", "status", "result", "comment")):
                 hidden.pop(key, None)
         hidden.pop("historical_prediction_label", None)
         examples.append(BenchmarkExample(hidden, actual, source_id(original)))
     return examples
+
+
+def benchmark_diagnostics(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    rows = list(records)
+    normal_rows = [row for row in rows if _is_normal(row)]
+    outcomes = Counter(_outcome_text(row) for row in normal_rows if _outcome_text(row))
+    return {
+        "total_records": len(rows),
+        "normal_records": len(normal_rows),
+        "records_with_outcome_text": sum(bool(_outcome_text(row)) for row in normal_rows),
+        "scorable_records": sum(normalize_outcome(row) is not None for row in normal_rows),
+        "unscorable_records": sum(normalize_outcome(row) is None for row in normal_rows),
+        "candidate_outcome_values": dict(outcomes.most_common(20)),
+    }
