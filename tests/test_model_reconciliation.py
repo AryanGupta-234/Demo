@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from pre_cab.failover_provider import FailoverProvider
+from pre_cab.model_router import GPTOSS120BRouter
 from pre_cab.models import ModelResponse
 from pre_cab.orchestrator import run_stage1
 from pre_cab.schemas import Decision, Strictness
@@ -64,9 +64,11 @@ def test_model_cannot_upgrade_deterministic_blocker() -> None:
     assert result.stage1.metadata["deterministic_prediction"] == "NOT_READY"
 
 
-def test_failover_uses_second_provider() -> None:
-    provider = FailoverProvider([StaticProvider(fail=True), StaticProvider("PASS")])
-    response = provider.generate(system="x", user="y")
+def test_router_uses_second_provider() -> None:
+    router = GPTOSS120BRouter([StaticProvider(fail=True), StaticProvider("PASS")])
+    response = router.generate(system="x", user="y")
     assert json.loads(response.text)["prediction"] == "PASS"
-    assert response.raw["pre_cab_failover"]["provider_used"] == "StaticProvider"
-    assert response.raw["pre_cab_failover"]["attempt_errors"]
+    assert len(router.last_attempts) == 2
+    assert router.last_attempts[0].ok is False
+    assert router.last_attempts[1].ok is True
+    assert response.raw["pre_cab_router"]["attempts"][0]["ok"] is False
