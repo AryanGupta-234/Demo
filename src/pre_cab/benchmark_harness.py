@@ -22,18 +22,42 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def prepare_benchmark_artifacts(input_path: str | Path, output_dir: str | Path) -> tuple[list[BenchmarkExample], dict[str, Any]]:
+def prepare_benchmark_artifacts(
+    input_path: str | Path,
+    output_dir: str | Path,
+) -> tuple[list[BenchmarkExample], dict[str, Any]]:
     source = Path(input_path)
     output = Path(output_dir)
     records = load_cr_records(source)
     examples = prepare_normal_benchmark(records)
     output.mkdir(parents=True, exist_ok=True)
-    (output / "normal_inputs.json").write_text(json.dumps([item.input_record for item in examples], ensure_ascii=False, indent=2), encoding="utf-8")
-    (output / "ground_truth.private.json").write_text(json.dumps({item.source_id: item.actual.value if item.actual else None for item in examples}, indent=2), encoding="utf-8")
-    manifest = build_manifest(records, seed=7, strictness=Strictness.BALANCED.value, limit=0, provider="none", llm_enabled=False, mode="prepared")
+    (output / "normal_inputs.json").write_text(
+        json.dumps([item.input_record for item in examples], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (output / "ground_truth.private.json").write_text(
+        json.dumps({item.source_id: item.actual.value if item.actual else None for item in examples}, indent=2),
+        encoding="utf-8",
+    )
+    scorable = sum(example.actual is not None for example in examples)
+    manifest = build_manifest(
+        records,
+        seed=7,
+        strictness=Strictness.BALANCED.value,
+        limit=0,
+        provider="none",
+        llm_enabled=False,
+        mode="prepared",
+    )
     manifest["source_file_sha256"] = _sha256_file(source)
     manifest["leakage_report"] = leakage_report(records)
     manifest["protected_field_count"] = len(POST_DECISION_FIELDS)
+    manifest["input_counts"] = {
+        "total_records": len(records),
+        "normal_records": len(examples),
+        "scorable_records": scorable,
+        "unscorable_records": len(examples) - scorable,
+    }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return examples, manifest
 
