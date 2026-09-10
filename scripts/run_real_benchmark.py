@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from pre_cab.benchmark_harness import prepare_benchmark_artifacts, run_fixed_benchmark, write_predictions_jsonl, write_report
+from pre_cab.input_loader import load_cr_records
 from pre_cab.provider_factory import build_provider
 from pre_cab.schemas import Strictness
 
@@ -30,7 +31,7 @@ def main() -> int:
     args = parser.parse_args()
 
     examples, manifest = prepare_benchmark_artifacts(args.input, args.output_dir)
-    records = json.loads(args.input.read_text(encoding="utf-8"))
+    records = load_cr_records(args.input)
     model = build_provider(args.provider) if args.llm else None
     full_pipeline = not args.stage1_only
     report = run_fixed_benchmark(
