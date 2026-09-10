@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import sys
 
+import main
 from pre_cab.batch import run_batch
-from pre_cab.input_loader import load_cr_records, normalize_cr_record
+from pre_cab.input_loader import load_cr_records, normalize_cr_record, record_type
 
 
 def _cr(number: str) -> dict[str, str]:
@@ -51,3 +53,20 @@ def test_batch_can_screen_json_without_attachment_evidence(tmp_path) -> None:
     assert row["validation_mode"] == "metadata_only"
     assert row["stage2_decision"] is None
     assert row["final_decision"] == row["stage1_decision"]
+
+
+def test_record_type_normalizes_service_now_variants() -> None:
+    assert record_type({"Type": "Normal Change"}) == "normal"
+    assert record_type({"change_classification": "Normal-change"}) == "normal"
+    assert record_type({"Change Type": "Emergency"}) == "emergency"
+
+
+def test_main_runs_without_model_credentials(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "single.json"
+    source.write_text(json.dumps({"result": [_cr("CHG-1000")]}), encoding="utf-8")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setattr(sys, "argv", ["main.py", str(source)])
+    monkeypatch.setattr(main, "build_provider", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("provider should not be used without credentials")))
+
+    assert main.main() == 0

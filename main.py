@@ -167,11 +167,16 @@ def main() -> int:
 
     if not records:
         raise SystemExit("Input JSON contains no CR records")
-    if not (os.getenv("GROQ_API_KEY") or os.getenv("HF_TOKEN")):
-        raise SystemExit("Set GROQ_API_KEY and/or HF_TOKEN before running the Pre-CAB brain.")
 
     strictness = Strictness(args.strictness)
-    model = build_provider(args.provider)
+    model = None
+    if os.getenv("GROQ_API_KEY") or os.getenv("HF_TOKEN"):
+        try:
+            model = build_provider(args.provider)
+        except Exception as exc:
+            print(f"LLM unavailable: {type(exc).__name__}: {exc}; continuing with deterministic evaluation only.")
+    else:
+        print("No GPT-OSS credentials detected; continuing with deterministic validation only.")
     memory = SQLiteUnifiedMemory(Path(".pre_cab") / "memory.sqlite3")
     audit = SQLiteAuditStore(Path(".pre_cab") / "audit.sqlite3")
 
@@ -217,6 +222,10 @@ def main() -> int:
     )
     print(f"\nResults: {batch_path}")
     return 0 if all(report.get("final_decision") != "ERROR" for report in reports) else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 
 if __name__ == "__main__":

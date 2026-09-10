@@ -80,9 +80,19 @@ def normalize_cr_record(record: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def normalize_change_type(value: Any) -> str:
+    """Canonicalize ServiceNow change-class variations into a single Normal/other label."""
+    text = " ".join(str(value or "").strip().lower().replace("_", " ").replace("-", " ").split())
+    if not text:
+        return ""
+    if text in {"normal", "normal change", "normalchange", "normal-change", "normal-change-request"}:
+        return "normal"
+    return text
+
+
 def record_type(record: dict[str, Any]) -> str:
-    value = first_value(record, "Type", "change type", "change_type", "type")
-    return str(value or "").strip().lower()
+    value = first_value(record, "Type", "change type", "change_type", "type", "change_class", "change_classification")
+    return normalize_change_type(value)
 
 
 def source_id(record: dict[str, Any]) -> str:

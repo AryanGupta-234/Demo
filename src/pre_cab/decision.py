@@ -1,6 +1,7 @@
 """Deterministic guardrails for final Pre-CAB decisions."""
 from __future__ import annotations
 
+from .input_loader import normalize_change_type
 from .requirements import infer_requirements
 from .schemas import Decision, Finding, FindingSeverity, Requirement, Strictness, ValidationResult
 
@@ -16,7 +17,7 @@ def _text(value: object) -> str:
 
 
 def classify_change(cr: dict) -> str:
-    return _text(cr.get("Type")).lower()
+    return normalize_change_type(cr.get("Type") or cr.get("change_type") or cr.get("Change Type") or cr.get("Change class") or "")
 
 
 def infer_uat_requirement(cr: dict) -> tuple[bool, str]:
