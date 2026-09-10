@@ -9,9 +9,11 @@ from __future__ import annotations
 import base64
 import io
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -26,9 +28,35 @@ class ServiceNowCredentials:
 
 
 class ReadOnlyServiceNowClient:
-    def __init__(self, credentials: ServiceNowCredentials, table: str = "change_request") -> None:
+    """Minimal, bounded, GET-only ServiceNow client.
+
+    Retries are limited to transient transport failures and 429/5xx responses. Authentication and
+    other 4xx responses fail immediately. Attachment downloads are size-bounded to avoid untrusted
+    ServiceNow content exhausting process memory.
+    """
+
+    def __init__(
+        self,
+        credentials: ServiceNowCredentials,
+        table: str = "change_request",
+        *,
+        timeout_seconds: float = 30.0,
+        attachment_timeout_seconds: float = 60.0,
+        max_retries: int = 2,
+        max_attachment_bytes: int = 25 * 1024 * 1024,
+        retry_backoff_seconds: float = 0.5,
+    ) -> None:
+        if max_retries < 0:
+            raise ValueError("max_retries must be >= 0")
+        if max_attachment_bytes <= 0:
+            raise ValueError("max_attachment_bytes must be > 0")
         self.credentials = credentials
         self.table = table
+        self.timeout_seconds = timeout_seconds
+        self.attachment_timeout_seconds = attachment_timeout_seconds
+        self.max_retries = max_retries
+        self.max_attachment_bytes = max_attachment_bytes
+        self.retry_backoff_seconds = retry_backoff_seconds
 
     def _request(self, path: str, *, accept: str = "application/json") -> Request:
         request = Request(
@@ -40,16 +68,47 @@ class ReadOnlyServiceNowClient:
         ).decode()
         request.add_header("Authorization", f"Basic {token}")
         request.add_header("Accept", accept)
+        request.add_header("User-Agent", "pre-cab-validator/read-only")
         return request
 
     def _get(self, path: str) -> dict[str, Any]:
-        with urlopen(self._request(path), timeout=30) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        raw = self._read(path, accept="application/json", timeout=self.timeout_seconds)
+        data = json.loads(raw.decode("utf-8"))
         return data if isinstance(data, dict) else {"result": data}
 
     def _get_bytes(self, path: str) -> bytes:
-        with urlopen(self._request(path, accept="*/*"), timeout=60) as response:
-            return response.read()
+        return self._read(path, accept="*/*", timeout=self.attachment_timeout_seconds)
+
+    def _read(self, path: str, *, accept: str, timeout: float) -> bytes:
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urlopen(self._request(path, accept=accept), timeout=timeout) as response:
+                    content_length = response.headers.get("Content-Length")
+                    if content_length and int(content_length) > self.max_attachment_bytes:
+                        raise ValueError("ServiceNow attachment exceeds configured size limit")
+                    chunks: list[bytes] = []
+                    total = 0
+                    while True:
+                        chunk = response.read(min(1024 * 1024, self.max_attachment_bytes - total + 1))
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > self.max_attachment_bytes:
+                            raise ValueError("ServiceNow response exceeds configured size limit")
+                        chunks.append(chunk)
+                    return b"".join(chunks)
+            except HTTPError as exc:
+                last_error = exc
+                if exc.code not in {429, 500, 502, 503, 504} or attempt >= self.max_retries:
+                    raise
+            except (URLError, TimeoutError, OSError) as exc:
+                last_error = exc
+                if attempt >= self.max_retries:
+                    raise
+            if self.retry_backoff_seconds > 0:
+                time.sleep(self.retry_backoff_seconds * (2**attempt))
+        raise RuntimeError("ServiceNow request failed") from last_error
 
     def get_change(self, number: str) -> dict[str, Any]:
         encoded = quote(f"number={number}", safe="")
@@ -109,7 +168,7 @@ class ReadOnlyServiceNowClient:
                 content = self.download_attachment(attachment_id)
                 text = self._extract_attachment_text(name, content)
                 extraction_error = None
-            except (OSError, RuntimeError, ValueError) as exc:
+            except (OSError, RuntimeError, ValueError, HTTPError, URLError) as exc:
                 text = ""
                 extraction_error = f"{type(exc).__name__}: {exc}"
             documents.append(
