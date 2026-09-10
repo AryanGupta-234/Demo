@@ -25,6 +25,13 @@ def build_reference_memory(records: Iterable[dict[str, Any]], memory: UnifiedMem
             "cab_outcome": outcome.value if outcome else None,
         }
         kind = MemoryKind.SIMILARITY if outcome is None else MemoryKind.CAB_HISTORY
-        memory.add(MemoryRecord(key=source_id, kind=kind, text=text, metadata=metadata))
+        memory.remember(
+            MemoryRecord(
+                memory_id=f"history:{source_id}",
+                kind=kind,
+                text=text,
+                metadata=metadata,
+            )
+        )
         count += 1
     return count
