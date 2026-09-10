@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from .brain_loop import AgenticReasoningLoop, ReasoningLoopResult
-from .evidence import EvidenceResult
+from .evidence import EvidenceDocument, EvidenceResult
+from .evidence_retrieval import retrieve_evidence_chunks
 from .memory import UnifiedMemory
 from .models import ModelProvider
 from .schemas import AgentContext, Decision, Finding, FindingSeverity, Strictness, ValidationResult
@@ -29,7 +30,7 @@ class FinalReasoningResult:
 def _parse(text: str) -> tuple[Decision | None, dict[str, Any] | None]:
     try:
         payload = json.loads(text)
-    except Exception:
+    except (json.JSONDecodeError, TypeError):
         return None, None
     if not isinstance(payload, dict) or not _REQUIRED_KEYS.issubset(payload):
         return None, None
@@ -40,9 +41,14 @@ def _parse(text: str) -> tuple[Decision | None, dict[str, Any] | None]:
     return decision, payload
 
 
-def _evidence_context(stage2: EvidenceResult | None) -> list[dict[str, Any]]:
+def _evidence_context(
+    cr: dict[str, Any],
+    stage2: EvidenceResult | None,
+    documents: list[EvidenceDocument] | None,
+) -> list[dict[str, Any]]:
     if stage2 is None:
         return []
+    chunks = retrieve_evidence_chunks(cr, documents or [], limit=10)
     return [
         {
             "decision": stage2.decision.value,
@@ -60,6 +66,17 @@ def _evidence_context(stage2: EvidenceResult | None) -> list[dict[str, Any]]:
                 }
                 for finding in stage2.findings
             ],
+            "ranked_attachment_excerpts": [
+                {
+                    "document_ref": chunk.document_ref,
+                    "document_name": chunk.document_name,
+                    "chunk_index": chunk.chunk_index,
+                    "score": chunk.score,
+                    "matched_terms": list(chunk.matched_terms),
+                    "text": chunk.text,
+                }
+                for chunk in chunks
+            ],
         }
     ]
 
@@ -72,10 +89,12 @@ def run_final_reasoning(
     strictness: Strictness,
     model: ModelProvider | None,
     memory: UnifiedMemory | None = None,
+    documents: list[EvidenceDocument] | None = None,
 ) -> FinalReasoningResult:
     """Run the one high-value GPT pass after deterministic/evidence validation.
 
-    GPT can only make readiness more conservative. Model failure/invalid output never upgrades a CR.
+    GPT receives only ranked evidence excerpts, not whole large attachments. It can make readiness more
+    conservative but never override a deterministic blocker in the final reconciliation step.
     """
     if model is None:
         return FinalReasoningResult(None, None, None, None)
@@ -83,7 +102,7 @@ def run_final_reasoning(
     context = AgentContext(
         cr=cr,
         strictness=strictness,
-        evidence=_evidence_context(stage2),
+        evidence=_evidence_context(cr, stage2, documents),
         prior_findings=tuple(validation.findings + (stage2.findings if stage2 else [])),
     )
     try:
@@ -91,7 +110,7 @@ def run_final_reasoning(
             context,
             findings=list(context.prior_findings),
         )
-    except Exception as exc:
+    except (RuntimeError, ValueError, OSError) as exc:
         return FinalReasoningResult(None, None, None, f"{type(exc).__name__}: {exc}")
 
     response = reasoning.critique or reasoning.initial
