@@ -4,13 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pre-cab-validator"
-version = "0.1.0"
+version = "0.2.0"
 description = "Model-independent Pre-CAB validation engine for Normal ServiceNow Change Requests."
 requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
+llm = ["openai>=1.55"]
+docs = ["pypdf>=5.0", "openpyxl>=3.1"]
 dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
+all = ["openai>=1.55", "pypdf>=5.0", "openpyxl>=3.1"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
