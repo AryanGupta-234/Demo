@@ -15,6 +15,7 @@ from .brain_schema import BRAIN_RESPONSE_SCHEMA
 from .memory import MemoryKind, UnifiedMemory
 from .models import ModelProvider, ModelResponse
 from .retrieval import build_cr_query
+from .sanitization import sanitize_cr_for_reasoning, sanitize_value
 from .schemas import AgentContext, Finding
 
 
@@ -61,8 +62,10 @@ class AgenticReasoningLoop:
         )
 
     def run(self, context: AgentContext, findings: list[Finding] | None = None) -> ReasoningLoopResult:
-        memories = self._memories(context.cr)
-        payload = build_reasoning_payload(context.cr, memories=memories, prior_findings=findings or [])
+        clean_cr = sanitize_cr_for_reasoning(context.cr)
+        memories = self._memories(clean_cr)
+        payload = build_reasoning_payload(clean_cr, memories=memories, prior_findings=findings or [])
+        payload = sanitize_value(payload)
         payload["strictness"] = context.strictness.value
         payload["self_critique_questions"] = list(self_critique_questions())
         payload["instruction"] = (
