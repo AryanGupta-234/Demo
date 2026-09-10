@@ -71,6 +71,7 @@ def budget_safe(requests: int, input_tokens: int, output_tokens: int, *, budget:
     budget = budget or InferenceBudget()
     return (
         requests <= budget.requests_per_day
+        and input_tokens <= budget.max_input_tokens_per_call
         and input_tokens + output_tokens <= budget.tokens_per_day
         and input_tokens + output_tokens <= budget.tokens_per_minute
     )
@@ -99,7 +100,8 @@ class BudgetGuard:
         self._roll_windows()
         total = estimated_input_tokens + estimated_output_tokens
         return (
-            self.state.minute_requests < self.budget.requests_per_minute
+            estimated_input_tokens <= self.budget.max_input_tokens_per_call
+            and self.state.minute_requests < self.budget.requests_per_minute
             and self.state.minute_tokens + total <= self.budget.tokens_per_minute
             and self.state.day_requests < self.budget.requests_per_day
             and self.state.day_tokens + total <= self.budget.tokens_per_day
