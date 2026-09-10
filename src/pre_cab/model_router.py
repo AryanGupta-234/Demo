@@ -1,7 +1,7 @@
 """Provider router for GPT-OSS 120B.
 
-The rest of the application only sees the ModelProvider contract. V1 can use Groq first and
-Hugging Face as a fallback, without changing agents, memory or decision logic.
+The rest of the application only sees the ModelProvider contract. Groq and Hugging Face can fail over
+without changing agents, memory, evidence validation or decision logic.
 """
 from __future__ import annotations
 
@@ -36,22 +36,29 @@ class GPTOSS120BRouter:
         user: str,
         temperature: float = 0.1,
         response_format: dict[str, Any] | None = None,
+        reasoning_effort: str = "high",
     ) -> ModelResponse:
         attempts: list[ProviderAttempt] = []
         for provider in self.providers:
-            name = getattr(provider, "model_name", provider.__class__.__name__)
+            name = f"{provider.__class__.__name__}:{getattr(provider, 'model_name', 'unknown')}"
             try:
                 response = provider.generate(
                     system=system,
                     user=user,
                     temperature=temperature,
                     response_format=response_format,
+                    reasoning_effort=reasoning_effort,
                 )
                 attempts.append(ProviderAttempt(name, True))
                 self.last_attempts = tuple(attempts)
-                return response
-            except Exception as exc:  # provider failover is intentionally narrow
+                raw = dict(response.raw) if isinstance(response.raw, dict) else {}
+                raw["pre_cab_router"] = {
+                    "provider_used": name,
+                    "attempts": [attempt.__dict__ for attempt in attempts],
+                }
+                return ModelResponse(response.text, response.model, raw)
+            except Exception as exc:
                 attempts.append(ProviderAttempt(name, False, str(exc)))
         self.last_attempts = tuple(attempts)
-        detail = "; ".join(f"{a.provider}: {a.error}" for a in attempts)
+        detail = "; ".join(f"{attempt.provider}: {attempt.error}" for attempt in attempts)
         raise RuntimeError(f"All GPT-OSS 120B providers failed: {detail}")
