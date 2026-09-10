@@ -1,23 +1,69 @@
 {
-  "scope": {"primary_type": "Normal", "excluded_types": ["Emergency"], "secondary_types": ["Standard"]},
+  "version": "2.0",
+  "scope": {
+    "primary_type": "Normal",
+    "excluded_types": ["Emergency"],
+    "secondary_types": ["Standard"],
+    "note": "Emergency changes are outside the primary V1 validation scope. Standard changes are not assumed equivalent to Normal and must remain policy-scoped."
+  },
   "strictness": {
     "lenient": {"warning": "CONDITIONAL", "blocking": "NOT_READY"},
     "balanced": {"warning": "CONDITIONAL", "blocking": "NOT_READY"},
     "strict": {"warning": "NOT_READY", "blocking": "NOT_READY"}
   },
-  "base_fields": [
-    "Number", "Short description", "Description", "Justification",
-    "Implementation plan", "Backout plan", "Test plan"
+  "baseline_fields": [
+    {"field": "Number", "domain": "identity", "severity": "BLOCKING"},
+    {"field": "Type", "domain": "identity", "severity": "BLOCKING"},
+    {"field": "Short description", "domain": "description", "severity": "WARNING"},
+    {"field": "Description", "domain": "description", "severity": "WARNING"},
+    {"field": "Justification", "domain": "business", "severity": "WARNING"},
+    {"field": "Implementation plan", "domain": "implementation", "severity": "BLOCKING"},
+    {"field": "Backout plan", "domain": "recovery", "severity": "BLOCKING"},
+    {"field": "Test plan", "domain": "testing", "severity": "WARNING"},
+    {"field": "Risk", "domain": "risk", "severity": "WARNING"}
   ],
-  "conditional_requirements": {
-    "UAT": "Functional or customer-facing behavior changes generally require appropriate functional validation.",
-    "Customer Approval": "Apply when the change has customer-specific impact or the applicable process requires it.",
-    "Outage Details": "Apply when service interruption or downtime is expected or possible.",
-    "Security Evidence": "Apply when security controls or security-relevant components are changed."
+  "conditional_fields": [
+    {"field": "Configuration item", "when": ["production-technical"], "severity": "WARNING"},
+    {"field": "Environment", "when": ["production-technical"], "severity": "WARNING"},
+    {"field": "Risk and impact analysis", "when": ["elevated-impact"], "severity": "WARNING"},
+    {"field": "Category", "when": ["context-required"], "severity": "WARNING"},
+    {"field": "Sub Category", "when": ["context-required"], "severity": "WARNING"},
+    {"field": "Conflict status", "when": ["conflict-check"], "severity": "BLOCKING"},
+    {"field": "Customer Approval", "when": ["customer-impact"], "severity": "WARNING", "evidence_capable": true},
+    {"field": "UAT signoff", "when": ["uat"], "severity": "WARNING", "evidence_capable": true},
+    {"field": "Test Results Evidence", "when": ["testing-evidence"], "severity": "WARNING", "evidence_capable": true},
+    {"field": "Planned start", "when": ["production-change-window"], "severity": "WARNING"},
+    {"field": "Planned end", "when": ["production-change-window"], "severity": "WARNING"},
+    {"field": "Affected Customers", "when": ["customer-impact"], "severity": "WARNING"},
+    {"field": "Service impact", "when": ["impact-detail"], "severity": "WARNING"},
+    {"field": "Downtime", "when": ["impact-detail"], "severity": "WARNING"},
+    {"field": "Security review", "when": ["security-change"], "severity": "WARNING", "evidence_capable": true},
+    {"field": "Privacy review", "when": ["sensitive-data"], "severity": "WARNING", "evidence_capable": true},
+    {"field": "Database validation", "when": ["database-change"], "severity": "WARNING", "evidence_capable": true},
+    {"field": "Network approval", "when": ["network-change"], "severity": "WARNING", "evidence_capable": true},
+    {"field": "Monitoring plan", "when": ["high-impact"], "severity": "WARNING"}
+  ],
+  "context_triggers": {
+    "uat": "functional + customer-impact + not infrastructure",
+    "customer-impact": "customer/payment/transaction/ATM/SMS/external-user/branch-channel signals",
+    "impact-detail": "production + restart/reboot/downtime/outage/customer-impact/high-impact",
+    "security-change": "security/vulnerability/certificate/credential/firewall/IAM/authentication/encryption/TLS/SSL signals",
+    "sensitive-data": "PII/personal/customer/sensitive/card/account/privacy data signals",
+    "database-change": "database/schema/table/index/migration/SQL signals",
+    "network-change": "network/firewall/route/load-balancer/proxy/DNS/port/connectivity signals",
+    "high-impact": "critical/high-impact/major/outage/payment/transaction signals or high/critical risk"
   },
   "hard_gates": {
     "conflict": "An unresolved reported conflict blocks readiness.",
     "unsupported_type": "Emergency is outside V1 scope.",
-    "missing_recovery": "A credible recovery mechanism is required unless a documented exception is accepted."
-  }
+    "missing_recovery": "A credible recovery mechanism is required unless a documented exception is accepted.",
+    "environment_contradiction": "A claim about one test environment contradicted by evidence from another environment is a blocking issue when the required environment is not proven."
+  },
+  "principles": [
+    "UAT is contextual; it is not universally mandatory.",
+    "A concise but credible reversible/backout mechanism can be acceptable.",
+    "Historical field correlations are advisory and must not become policy automatically.",
+    "Similarity does not equal approval; cloned fields require delta revalidation.",
+    "Unknown fields remain available for analysis but are not made mandatory solely because they exist."
+  ]
 }
