@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from .requirements import Requirement
-from .schemas import Decision, Finding, FindingSeverity, Strictness
+from .schemas import Decision, Finding, FindingSeverity, Requirement, Strictness
 
 
 class EvidenceDocument:
