@@ -1,0 +1,23 @@
+{
+  "scope": {"primary_type": "Normal", "excluded_types": ["Emergency"], "secondary_types": ["Standard"]},
+  "strictness": {
+    "lenient": {"warning": "CONDITIONAL", "blocking": "NOT_READY"},
+    "balanced": {"warning": "CONDITIONAL", "blocking": "NOT_READY"},
+    "strict": {"warning": "NOT_READY", "blocking": "NOT_READY"}
+  },
+  "base_fields": [
+    "Number", "Short description", "Description", "Justification",
+    "Implementation plan", "Backout plan", "Test plan"
+  ],
+  "conditional_requirements": {
+    "UAT": "Functional or customer-facing behavior changes generally require appropriate functional validation.",
+    "Customer Approval": "Apply when the change has customer-specific impact or the applicable process requires it.",
+    "Outage Details": "Apply when service interruption or downtime is expected or possible.",
+    "Security Evidence": "Apply when security controls or security-relevant components are changed."
+  },
+  "hard_gates": {
+    "conflict": "An unresolved reported conflict blocks readiness.",
+    "unsupported_type": "Emergency is outside V1 scope.",
+    "missing_recovery": "A credible recovery mechanism is required unless a documented exception is accepted."
+  }
+}
