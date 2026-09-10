@@ -5,6 +5,7 @@ verify claims made in ServiceNow fields. Authentication/deployment concerns rema
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .evidence import EvidenceDocument
@@ -16,10 +17,16 @@ from .schemas import Strictness
 def create_app(*, model: Any = None, memory: Any = None) -> Any:
     try:
         from fastapi import FastAPI
+        from fastapi.responses import FileResponse
     except ImportError as exc:
         raise RuntimeError("Install the 'api' extra to run the HTTP interface") from exc
 
     app = FastAPI(title="Pre-CAB Validator", version="0.3.0")
+
+    @app.get("/")
+    def home() -> Any:
+        ui = Path(__file__).resolve().parents[2] / "web" / "index.html"
+        return FileResponse(ui) if ui.exists() else {"service": "pre-cab-validator"}
 
     @app.get("/health")
     def health() -> dict[str, Any]:
