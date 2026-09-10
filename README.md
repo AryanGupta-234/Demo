@@ -2,6 +2,53 @@
 
 Model-independent proof of concept for validating **Normal** ServiceNow Change Requests before CAB.
 
+## Current main test mode
+
+The current testing target is deliberately simple:
+
+```text
+Manual CR JSON
+      ↓
+Pre-CAB deterministic specialist agents
+      ↓
+Unified local memory
+      ↓
+GPT-OSS 120B API reasoning brain
+      ↓
+Conservative decision gate
+      ↓
+PASS / CONDITIONAL / NOT_READY
+```
+
+**One command** runs the whole brain. ServiceNow fetching and attachment/file-management are upstream inputs and are intentionally not required for this current test. Attachment processing remains implemented but can be enabled later when the upstream CR workspace is attached.
+
+Prepare an environment variable for one of the GPT-OSS 120B API routes:
+
+```powershell
+$env:GROQ_API_KEY="YOUR_GROQ_KEY"
+```
+
+or:
+
+```powershell
+$env:HF_TOKEN="YOUR_HUGGING_FACE_TOKEN"
+```
+
+Then give the runner a JSON file containing **exactly one CR record**:
+
+```powershell
+python main.py "C:\path\to\one_cr.json"
+```
+
+Defaults are `Balanced` strictness and `auto` GPT-OSS 120B provider routing. The command automatically initializes local unified memory and audit storage, runs the specialist preprocessing agents, executes the GPT-OSS reasoning brain, applies the conservative reconciliation gate, prints a CAB-friendly + technical result, and saves a machine-readable JSON result under `artifacts/`.
+
+Optional controls are still available when needed:
+
+```powershell
+python main.py "C:\path\to\one_cr.json" --strictness strict
+python main.py "C:\path\to\one_cr.json" --provider groq
+```
+
 ## Scope
 
 - Normal CRs are the primary supported change type.
@@ -62,18 +109,11 @@ Sensitive production CR exports and downloaded attachments must remain in the co
 9. Free-tier operation favors local preprocessing/retrieval and one high-value GPT-OSS 120B synthesis pass rather than many independent model calls.
 10. Unreadable/scanned/image-only evidence is never silently treated as verified; it is surfaced for OCR/vision review.
 
-## Run the manager demo
+## Full validation and integration modes
 
-```text
-pip install -e '.[all]'
-uvicorn pre_cab.api:create_app --factory --host 127.0.0.1 --port 8000
-```
+The one-command manual brain test above is the preferred current capability test. The broader repository also retains the full benchmark, evidence and integration tooling for later phases.
 
-Then open `http://127.0.0.1:8000/`.
-
-The demo UI keeps the CAB result prominent while retaining technical findings and evidence detail underneath.
-
-## Local historical-data benchmark
+### Local historical-data benchmark
 
 Keep the real ServiceNow export outside Git. The benchmark preparation scripts read the local file, filter to Normal changes, remove outcome-bearing fields, and write sanitized model input plus a private ground-truth file.
 
@@ -82,37 +122,14 @@ python scripts/prepare_benchmark.py real_data/cr_export.json
 python scripts/profile_fields.py real_data/cr_export.json
 ```
 
-For a fixed, reproducible Stage-1 benchmark sample:
+### ServiceNow / CR workspace integration
 
-```text
-python scripts/run_benchmark.py real_data/cr_export.json --limit 0 --seed 7 --strictness balanced
-```
-
-For the GPT-OSS 120B Stage-1 baseline:
-
-```text
-python scripts/run_benchmark.py real_data/cr_export.json --limit 50 --seed 7 --strictness balanced --llm --provider auto
-```
-
-For the end-to-end benchmark (evidence-aware pipeline plus optional GPT-OSS 120B final reasoning):
-
-```text
-python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced
-python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --llm --provider auto
-```
-
-If the upstream ServiceNow fetcher/file manager has produced one private directory per CR, point the validator at the **parent directory**:
-
-```text
-python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --attachment-root real_data/cr_workspace
-python scripts/run_real_benchmark.py real_data/cr_export.json --strictness balanced --attachment-root real_data/cr_workspace --llm --provider auto
-```
-
-Expected layout:
+When the upstream fetcher and file manager are attached, use a private workspace such as:
 
 ```text
 real_data/cr_workspace/
 ├── CR001234/
+│   ├── cr.json
 │   ├── approval.pdf
 │   └── test-results.pdf
 ├── CR001235/
@@ -120,20 +137,9 @@ real_data/cr_workspace/
 └── ...
 ```
 
-Use `--stage1-only` when you specifically want to isolate Stage 1. The end-to-end harness records the pipeline mode in the manifest so Stage-1-only and full-pipeline results are not confused.
+The validator can then consume that directory per CR. The current main test does not require it.
 
-The command writes a benchmark report, prediction JSONL, and dataset/configuration manifest. The manifest contains hashes/counts and runtime configuration, not raw CR contents. Never provide `ground_truth.private.json` to the model prompt or retrieval memory.
-
-Layer ablation is available through:
-
-```text
-python scripts/run_ablation.py real_data/cr_export.json --limit 50 --seed 7 --strictness balanced
-python scripts/run_ablation.py real_data/cr_export.json --limit 50 --seed 7 --strictness balanced --llm --provider auto
-```
-
-If private attachment evidence is available locally, add `--attachment-root <private-cr-workspace>`; attachment contents remain local.
-
-## Current API
+### Current API
 
 - `GET /health`
 - `POST /v1/pre-cab/validate`
@@ -169,10 +175,11 @@ The validation endpoint accepts the CR plus extracted attachment records. The re
 - Benchmark dataset fingerprints, manifests and layer-ablation tooling.
 - Reviewed requirement-level evaluation framework with per-label precision/recall/F1 and reviewer feedback/episodic-memory path.
 - Explicit private CR-workspace handoff: the validator consumes one CR directory's downloaded attachments without owning upstream ServiceNow file management.
+- One-command API-backed manual CR brain runner (`python main.py <one_cr.json>`).
 
 ## Capability benchmark sequence
 
-Run entirely locally against the controlled historical dataset:
+Run entirely locally against the controlled historical dataset when benchmark testing is needed:
 
 1. Profile the Normal-CR schema and population patterns.
 2. Normalize historical CAB outcomes into benchmark labels.
@@ -185,38 +192,6 @@ Run entirely locally against the controlled historical dataset:
 9. Fit/validate confidence calibration only after enough reviewed outcomes exist.
 
 The real-data execution itself should happen in the user's controlled environment; the public repository contains only the benchmark tooling and synthetic fixtures.
-
-## Free-tier mode
-
-The intended V1 operating pattern is:
-
-```text
-ServiceNow fetcher / file manager
-      ↓
-Private CR workspace
-      ↓
-Local preprocessing
-      ↓
-Local retrieval + memory
-      ↓
-Deterministic specialist agents
-      ↓
-Stage-2 evidence verification
-      ↓
-One bounded GPT-OSS 120B reasoning/synthesis pass
-      ↓
-Conservative reconciliation (model may downgrade, never upgrade)
-```
-
-Provider routing:
-
-```text
-Groq GPT-OSS 120B
-        ↓
-Hugging Face GPT-OSS 120B (alternate)
-```
-
-API keys are environment variables only (`GROQ_API_KEY`, `HF_TOKEN`); they are never stored in source control.
 
 ## Fine-tuning path
 
@@ -241,15 +216,11 @@ Compare against baseline
 ## Repository layout
 
 ```text
-src/
-  pre_cab/
-    Specialized deterministic agents, reasoning, decisioning, documents,
-    memory, model providers, retrieval, similarity, reporting and API
-
-data/
-  demo/              Synthetic demo dataset only
-
-config/              Explicit Normal-CR governance rules
-scripts/              Local demo, benchmark, profiling and evaluation utilities
-tests/                Unit and integration regression tests
+main.py                One-command API-backed manual CR brain test
+src/pre_cab/           Agents, reasoning, decisioning, documents, memory,
+                       model providers, retrieval, similarity, reporting and API
+data/demo/             Synthetic demo dataset only
+config/                Explicit Normal-CR governance rules
+scripts/               Integration, benchmark and evaluation utilities
+tests/                 Unit and integration regression tests
 ```
