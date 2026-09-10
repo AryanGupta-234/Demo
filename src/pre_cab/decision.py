@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .input_loader import normalize_change_type
 from .requirements import infer_requirements
+from .rules import context_flags, field_quality, required_field_policies
 from .schemas import Decision, Finding, FindingSeverity, Requirement, Strictness, ValidationResult
 
 STRICTNESS_PENALTIES = {
@@ -45,13 +46,27 @@ def _find_requirement(requirements: list[Requirement], name: str) -> Requirement
     return next((r for r in requirements if r.name.lower() == needle), None)
 
 
+def _missing_severity(policy_name: str, declared: str, strictness: Strictness) -> FindingSeverity:
+    """Apply governance severity while keeping strictness a tolerance control.
+
+    Identity, implementation and recovery gaps are hard blockers. Other gaps are warnings in
+    balanced/lenient mode and become blockers under strict mode when the rule declares them blocking.
+    """
+    if declared.upper() == "BLOCKING":
+        return FindingSeverity.BLOCKING
+    if strictness == Strictness.STRICT:
+        return FindingSeverity.BLOCKING
+    return FindingSeverity.WARNING
+
+
 def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> ValidationResult:
-    """Validate a Normal CR before document evidence is independently verified."""
+    """Run the centralized Normal-CR field/rule engine before document evidence verification."""
     findings: list[Finding] = []
     requirements: list[Requirement] = []
     score = 100.0
 
-    if classify_change(cr) != "normal":
+    change_type = classify_change(cr)
+    if change_type != "normal":
         findings.append(Finding(
             "OUT_OF_SCOPE", "Change type out of V1 scope", FindingSeverity.BLOCKING,
             "V1 validates Normal CRs; this request is not Normal.",
@@ -59,31 +74,39 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
             recommendation="Route the CR through the appropriate change process.",
         ))
 
-    required = {
-        "Number": "Change identifier",
-        "Short description": "Change summary",
-        "Description": "Change description",
-        "Justification": "Business/operational reason",
-        "Implementation plan": "Implementation approach",
-        "Backout plan": "Recovery path",
-        "Test plan": "Testing approach or rationale",
-    }
-    for field, label in required.items():
-        if not _text(cr.get(field)):
-            severity = FindingSeverity.BLOCKING if strictness == Strictness.STRICT or field in {"Implementation plan", "Backout plan"} else FindingSeverity.WARNING
+    policies = required_field_policies(cr)
+    flags = context_flags(cr)
+    for policy, required, matched_flags in policies:
+        requirements.append(
+            Requirement(
+                policy.field,
+                required,
+                (
+                    f"Baseline field: {policy.label}."
+                    if policy.baseline
+                    else f"Required when: {', '.join(matched_flags) or ', '.join(policy.required_when)}."
+                ),
+                source="field-policy-v2",
+            )
+        )
+        if required and not _text(cr.get(policy.field)):
+            severity = _missing_severity(policy.field, policy.missing_severity, strictness)
             findings.append(Finding(
-                f"MISSING_{field.upper().replace(' ', '_')}", f"Missing {label}", severity,
-                f"{label} is not populated in the CR.",
-                technical_detail=f"Field {field!r} is empty.",
-                recommendation=f"Provide {label.lower()} before CAB review.",
+                f"MISSING_{policy.field.upper().replace(' ', '_').replace('/', '_')}",
+                f"Missing {policy.label}",
+                severity,
+                f"{policy.label} is required for this CR under the active field policy.",
+                technical_detail=f"Matched conditions={matched_flags or ('baseline',)}; domain={policy.domain}.",
+                recommendation=f"Populate {policy.label.lower()} before CAB review.",
             ))
             score -= STRICTNESS_PENALTIES[strictness]["warning"]
 
+    # Preserve the dedicated recovery semantic check: presence is not enough.
     rollback_ok, rollback_reason = rollback_quality(cr.get("Backout plan"))
     findings.append(Finding(
         "BACKOUT_OK" if rollback_ok else "BACKOUT_WEAK",
         "Recovery path identified" if rollback_ok else "Recovery path needs attention",
-        FindingSeverity.INFO if rollback_ok else (FindingSeverity.BLOCKING if strictness == Strictness.STRICT else FindingSeverity.WARNING),
+        FindingSeverity.INFO if rollback_ok else FindingSeverity.BLOCKING,
         "The CR contains a plausible recovery mechanism." if rollback_ok else "The backout plan does not yet provide a clear recovery mechanism.",
         technical_detail=rollback_reason,
         recommendation="Add or justify a usable rollback/recovery path." if not rollback_ok else "",
@@ -91,8 +114,12 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
     if not rollback_ok:
         score -= STRICTNESS_PENALTIES[strictness]["warning"]
 
+    # Contextual requirements remain visible even when their field is not populated.
     for prediction in infer_requirements(cr):
-        requirements.append(Requirement(prediction.name, prediction.required, prediction.reason, source="context"))
+        if prediction.name not in {req.name for req in requirements}:
+            requirements.append(Requirement(
+                prediction.name, prediction.required, prediction.reason, source="contextual-rule-v2"
+            ))
 
     uat_req = _find_requirement(requirements, "UAT")
     if uat_req and uat_req.required:
@@ -101,47 +128,42 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
             "Functional/customer-facing signals make UAT or equivalent validation applicable.",
             technical_detail=uat_req.reason,
         ))
-        if not _text(cr.get("Test plan")):
-            findings.append(Finding(
-                "UAT_PLAN_MISSING", "UAT/testing plan missing", FindingSeverity.WARNING,
-                "The change context suggests functional testing, but no testing plan is present.",
-                recommendation="Provide the applicable functional/UAT test approach.",
-            ))
     else:
         findings.append(Finding(
             "UAT_NOT_MANDATORY", "UAT not assumed mandatory", FindingSeverity.INFO,
-            "The validator does not require UAT solely because the field exists.",
+            "The validator does not require UAT solely because the field exists; applicability is contextual.",
             technical_detail=uat_req.reason if uat_req else "No UAT prediction was produced.",
         ))
 
-    customer_req = _find_requirement(requirements, "Customer approval")
+    customer_req = _find_requirement(requirements, "Customer Approval")
     if customer_req and customer_req.required:
-        approval = _text(cr.get("Customer Approval"))
-        completed = approval.lower() in {"yes", "approved"}
+        approval = _text(cr.get("Customer Approval")).lower()
+        completed = approval in {"yes", "approved", "approved by customer", "complete", "completed"}
         if completed:
             findings.append(Finding(
                 "CUSTOMER_APPROVAL_PRESENT", "Customer approval recorded", FindingSeverity.INFO,
-                "The CR records a completed customer approval state; attachment evidence is verified separately.",
+                "The CR records a completed customer approval state; document evidence is verified separately when available.",
                 technical_detail=f"Customer Approval={approval!r}",
             ))
         else:
+            severity = FindingSeverity.BLOCKING if strictness == Strictness.STRICT else FindingSeverity.WARNING
             findings.append(Finding(
-                "CUSTOMER_APPROVAL_GAP", "Customer approval is expected", FindingSeverity.BLOCKING if strictness == Strictness.STRICT else FindingSeverity.WARNING,
-                "The change context suggests customer approval should be verified, but the CR does not show a completed approval.",
+                "CUSTOMER_APPROVAL_GAP", "Customer approval is expected", severity,
+                "The change context suggests customer approval should be verified, but a completed approval is not recorded.",
                 technical_detail=f"Customer Approval={approval!r}; reason={customer_req.reason}",
-                recommendation="Obtain and attach the applicable customer approval evidence, or document an approved exception.",
+                recommendation="Obtain applicable customer approval evidence or document an approved exception.",
             ))
             score -= STRICTNESS_PENALTIES[strictness]["warning"]
 
     conflict = _text(cr.get("Conflict status")).lower()
-    if conflict == "conflict":
+    if conflict in {"conflict", "conflicted"}:
         findings.append(Finding(
             "CONFLICT", "Blocking change conflict", FindingSeverity.BLOCKING,
             "ServiceNow reports a conflict for this change.",
-            technical_detail="Conflict status=Conflict",
+            technical_detail=f"Conflict status={conflict!r}",
             recommendation="Resolve or explicitly disposition the conflict before approval.",
         ))
-    elif conflict in {"not run", ""}:
+    elif conflict in {"not run", "not checked", "unknown", ""}:
         findings.append(Finding(
             "CONFLICT_UNVERIFIED", "Conflict status is not fully verified", FindingSeverity.WARNING,
             "A current conflict check is not confirmed.",
@@ -152,16 +174,22 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
     else:
         findings.append(Finding(
             "NO_CONFLICT", "No blocking conflict reported", FindingSeverity.INFO,
-            "ServiceNow reports no conflict for this change.",
+            "ServiceNow reports no blocking conflict for this change.",
             technical_detail=f"Conflict status={conflict!r}",
         ))
 
-    if not _text(cr.get("Configuration item")):
+    # Surface quality scores as non-blocking intelligence so GPT-OSS can reason on quality rather
+    # than treating every populated field as equally good.
+    quality = field_quality(cr)
+    low_quality = [item for item in quality if item.present and item.score < 0.45]
+    if low_quality:
         findings.append(Finding(
-            "CI_MISSING", "Configuration item is not populated",
+            "FIELD_QUALITY_WEAK",
+            "One or more populated fields are weak or placeholder-like",
             FindingSeverity.WARNING if strictness != Strictness.STRICT else FindingSeverity.BLOCKING,
-            "The affected production configuration item is not identified in the CR.",
-            recommendation="Relate the applicable configuration item(s).",
+            "Some required/contextual fields are present but contain weak or placeholder-like content.",
+            technical_detail="; ".join(f"{item.field}={item.score:.2f}" for item in low_quality),
+            recommendation="Replace placeholders with specific, testable operational detail.",
         ))
         score -= STRICTNESS_PENALTIES[strictness]["warning"]
 
@@ -169,10 +197,27 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
     warnings = [f for f in findings if f.severity == FindingSeverity.WARNING]
     decision = Decision.NOT_READY if blocking else (Decision.CONDITIONAL if warnings else Decision.PASS)
     score = max(0.0, min(100.0, score))
-    confidence = max(0.50, min(0.99, 0.75 + (score / 100.0) * 0.24 - len(warnings) * 0.02))
+    confidence = max(0.50, min(0.99, 0.72 + (score / 100.0) * 0.26 - len(warnings) * 0.015))
+
     return ValidationResult(
-        decision=decision, confidence=confidence, score=score, strictness=strictness,
-        findings=findings, requirements=requirements,
-        technical_summary="Field-level validation completed; attachments have not yet been independently verified.",
+        decision=decision,
+        confidence=confidence,
+        score=score,
+        strictness=strictness,
+        findings=findings,
+        requirements=requirements,
+        technical_summary=(
+            "Centralized field-policy validation completed; contextual requirements and field quality "
+            "were evaluated, while attachments remain a separate evidence stage."
+        ),
         cab_summary=decision.value.replace("_", " ").title(),
+        metadata={
+            "rule_engine_version": "2.0",
+            "context_flags": flags,
+            "required_field_count": sum(1 for _, required, _ in policies if required),
+            "field_quality": [
+                {"field": item.field, "present": item.present, "score": item.score, "reasons": list(item.reasons)}
+                for item in quality
+            ],
+        },
     )
