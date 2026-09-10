@@ -64,7 +64,7 @@ class ValidationResult:
 @dataclass(frozen=True)
 class AgentContext:
     cr: dict[str, Any]
-    retrieved_memory: list[dict[str, Any]] = ()
-    evidence: list[dict[str, Any]] = ()
+    retrieved_memory: list[dict[str, Any]] = field(default_factory=list)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
     strictness: Strictness = Strictness.BALANCED
     prior_findings: tuple[Finding, ...] = ()
