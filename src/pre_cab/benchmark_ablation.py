@@ -33,18 +33,21 @@ def run_ablation(
         "full_gpt_oss": [],
     }
     for example in examples:
+        actual = example.actual
+        if actual is None:
+            continue
         base = run_stage1(example.input_record, strictness=strictness, model=None, memory=None).stage1
-        strategies["deterministic"].append({"source_id": example.source_id, "actual": example.actual.value, "predicted": base.decision.value})
+        strategies["deterministic"].append({"source_id": example.source_id, "actual": actual.value, "predicted": base.decision.value})
         enriched = run_stage1(example.input_record, strictness=strictness, model=None, memory=memory).stage1
-        strategies["deterministic_memory_clone"].append({"source_id": example.source_id, "actual": example.actual.value, "predicted": enriched.decision.value})
+        strategies["deterministic_memory_clone"].append({"source_id": example.source_id, "actual": actual.value, "predicted": enriched.decision.value})
         evidence_result = run_pre_cab(example.input_record, attachment_root=attachment_root, strictness=strictness, model=None, memory=memory)
-        strategies["deterministic_evidence"].append({"source_id": example.source_id, "actual": example.actual.value, "predicted": evidence_result.final_decision.value})
+        strategies["deterministic_evidence"].append({"source_id": example.source_id, "actual": actual.value, "predicted": evidence_result.final_decision.value})
         if model is not None:
             full = run_pre_cab(example.input_record, attachment_root=attachment_root, strictness=strictness, model=model, memory=memory)
             full_prediction = full.final_decision
         else:
             full_prediction = evidence_result.final_decision
-        strategies["full_gpt_oss"].append({"source_id": example.source_id, "actual": example.actual.value, "predicted": full_prediction.value})
+        strategies["full_gpt_oss"].append({"source_id": example.source_id, "actual": actual.value, "predicted": full_prediction.value})
 
     output: dict[str, Any] = {"strictness": strictness.value, "count": len(examples), "strategies": {}}
     for name, rows in strategies.items():
