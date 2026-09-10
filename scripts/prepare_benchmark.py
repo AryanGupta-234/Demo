@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from pre_cab.benchmark_prepare import prepare_normal_benchmark
+from pre_cab.input_loader import load_cr_records
 
 
 def main() -> int:
@@ -18,10 +19,7 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/benchmark"))
     args = parser.parse_args()
 
-    records = json.loads(args.input.read_text(encoding="utf-8"))
-    if not isinstance(records, list):
-        raise SystemExit("Input JSON must contain a list of CR records")
-
+    records = load_cr_records(args.input)
     examples = prepare_normal_benchmark(records)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
