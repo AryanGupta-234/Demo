@@ -12,6 +12,7 @@ from typing import Any
 
 from .brain import build_reasoning_payload, build_reasoning_system_prompt, self_critique_questions
 from .brain_schema import BRAIN_RESPONSE_SCHEMA
+from .context_compaction import compact_cr, compact_evidence, compact_findings, compact_memory
 from .memory import MemoryKind, UnifiedMemory
 from .models import ModelProvider, ModelResponse
 from .retrieval import build_cr_query
@@ -62,12 +63,15 @@ class AgenticReasoningLoop:
         )
 
     def run(self, context: AgentContext, findings: list[Finding] | None = None) -> ReasoningLoopResult:
-        clean_cr = sanitize_cr_for_reasoning(context.cr)
+        clean_cr = compact_cr(sanitize_cr_for_reasoning(context.cr))
         memories = self._memories(clean_cr)
         payload = build_reasoning_payload(clean_cr, memories=memories, prior_findings=findings or [])
         payload = sanitize_value(payload)
+        payload["cr"] = compact_cr(dict(payload.get("cr") or {}))
+        payload["retrieved_memory"] = compact_memory(list(payload.get("retrieved_memory") or []), limit=8)
+        payload["prior_findings"] = compact_findings(list(payload.get("prior_findings") or []), limit=24)
         payload["strictness"] = context.strictness.value
-        payload["evidence"] = sanitize_value(list(context.evidence or ()))
+        payload["evidence"] = compact_evidence(sanitize_value(list(context.evidence or ())), limit=10)
         payload["self_critique_questions"] = list(self_critique_questions())
         payload["instruction"] = (
             "Produce the final structured assessment using CR fields, retrieved history/policy, and "
