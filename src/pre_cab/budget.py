@@ -5,7 +5,7 @@ V1 keeps specialist work local/deterministic and budgets the LLM for the highest
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from time import monotonic
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,16 @@ class InferencePlan:
     reason: str
 
 
+@dataclass
+class UsageState:
+    minute_started: float
+    minute_requests: int = 0
+    minute_tokens: int = 0
+    day_started: float = 0.0
+    day_requests: int = 0
+    day_tokens: int = 0
+
+
 def estimate_tokens(text: str) -> int:
     """Conservative rough token estimate for budgeting only, not billing."""
     return max(1, (len(text) + 3) // 4)
@@ -36,7 +46,8 @@ def estimate_tokens(text: str) -> int:
 def plan_reasoning_call(payload_text: str, *, budget: InferenceBudget | None = None) -> InferencePlan:
     budget = budget or InferenceBudget()
     estimated_input = estimate_tokens(payload_text)
-    if estimated_input <= budget.max_input_tokens_per_call:
+    total = estimated_input + budget.reserved_output_tokens
+    if estimated_input <= budget.max_input_tokens_per_call and total <= budget.tokens_per_minute:
         return InferencePlan(
             calls=1,
             estimated_input_tokens=estimated_input,
@@ -63,3 +74,41 @@ def budget_safe(requests: int, input_tokens: int, output_tokens: int, *, budget:
         and input_tokens + output_tokens <= budget.tokens_per_day
         and input_tokens + output_tokens <= budget.tokens_per_minute
     )
+
+
+class BudgetGuard:
+    """In-process admission control for development/free-tier model calls."""
+
+    def __init__(self, budget: InferenceBudget | None = None) -> None:
+        self.budget = budget or InferenceBudget()
+        now = monotonic()
+        self.state = UsageState(minute_started=now, day_started=now)
+
+    def _roll_windows(self) -> None:
+        now = monotonic()
+        if now - self.state.minute_started >= 60:
+            self.state.minute_started = now
+            self.state.minute_requests = 0
+            self.state.minute_tokens = 0
+        if now - self.state.day_started >= 86_400:
+            self.state.day_started = now
+            self.state.day_requests = 0
+            self.state.day_tokens = 0
+
+    def allow(self, *, estimated_input_tokens: int, estimated_output_tokens: int) -> bool:
+        self._roll_windows()
+        total = estimated_input_tokens + estimated_output_tokens
+        return (
+            self.state.minute_requests < self.budget.requests_per_minute
+            and self.state.minute_tokens + total <= self.budget.tokens_per_minute
+            and self.state.day_requests < self.budget.requests_per_day
+            and self.state.day_tokens + total <= self.budget.tokens_per_day
+        )
+
+    def record(self, *, input_tokens: int, output_tokens: int) -> None:
+        self._roll_windows()
+        total = input_tokens + output_tokens
+        self.state.minute_requests += 1
+        self.state.minute_tokens += total
+        self.state.day_requests += 1
+        self.state.day_tokens += total
