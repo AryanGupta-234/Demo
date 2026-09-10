@@ -50,7 +50,7 @@ def normalize_cab_recommendation(value: Any) -> Decision | None:
 
 
 def outcome_distribution(records: Iterable[dict[str, Any]]) -> dict[str, int]:
-    counter = Counter()
+    counter: Counter[str] = Counter()
     for record in records:
         if str(record.get("Type") or "").strip().lower() != "normal":
             continue
