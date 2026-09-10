@@ -1,0 +1,11 @@
+CR reference: CHG-DEMO-003
+Environment: DEV
+Testing summary: smoke testing completed in development only.
+Expected result: SMS generated.
+Actual result: SMS generated.
+Status: PASS
+
+Approval note:
+No customer approval is recorded in this document.
+
+Important: this document does not demonstrate UAT or customer approval for the production change.
