@@ -1,9 +1,4 @@
-"""Hugging Face Inference Providers adapter for GPT-OSS 120B.
-
-Hugging Face exposes an OpenAI-compatible router and can route GPT-OSS 120B to a
-specific provider or a provider-selection policy. The adapter implements the same
-ModelProvider contract as the Groq adapter so agents remain provider-neutral.
-"""
+"""Hugging Face Inference Providers adapter for GPT-OSS 120B."""
 from __future__ import annotations
 
 import json
@@ -46,7 +41,10 @@ class HuggingFaceGPTOSS120B:
         user: str,
         temperature: float = 0.1,
         response_format: dict[str, Any] | None = None,
+        reasoning_effort: str = "high",
     ) -> ModelResponse:
+        if reasoning_effort not in {"low", "medium", "high"}:
+            raise ValueError("reasoning_effort must be low, medium, or high")
         try:
             from urllib.request import Request, urlopen
 
@@ -58,6 +56,10 @@ class HuggingFaceGPTOSS120B:
                 ],
                 "temperature": temperature,
             }
+            # Provider support for reasoning controls can vary behind the HF router; only send it
+            # when explicitly enabled so the adapter remains compatible with hosted backends.
+            if os.getenv("HF_SEND_REASONING_EFFORT", "0") == "1":
+                payload["reasoning_effort"] = reasoning_effort
             if response_format:
                 payload["response_format"] = response_format
 
