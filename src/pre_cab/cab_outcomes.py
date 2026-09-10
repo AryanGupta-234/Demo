@@ -5,14 +5,24 @@ from .schemas import Decision
 
 
 def normalize_cab_recommendation(value: Any) -> Decision | None:
+    """Map only reasonably explicit CAB outcomes; requests/instructions remain unscored."""
     text = str(value or "").strip().lower()
     if not text:
         return None
-    if any(term in text for term in ("cancellation requested", "request for cancellation", "cancelled", "cancel", "reject", "insufficient information")):
+    if any(term in text for term in (
+        "cancellation requested", "request for cancellation", "cancelled", "canceled",
+        "cancel as", "not approved", "rejected", "reject", "hold", "insufficient information",
+    )):
         return Decision.NOT_READY
-    if any(term in text for term in ("conditionally approved", "conditional", "condition", "test results reqd", "schedule change is required")):
+    if any(term in text for term in (
+        "conditionally approved", "conditional", "condition", "schedule needs to be updated",
+        "schedule change is required", "subject to", "test results reqd",
+        "customer approval reqd", "customer approval required",
+    )):
         return Decision.CONDITIONAL
-    if any(term in text for term in ("approved", "approve", "approvd")):
+    if any(term in text for term in (
+        "approved", "change is approved", "cr is approved", "approval granted", "approval attached",
+    )) and not any(term in text for term in ("please approve", "pls approve", "request approval")):
         return Decision.PASS
     return None
 
