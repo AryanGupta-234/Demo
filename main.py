@@ -167,15 +167,18 @@ def main() -> int:
         raise SystemExit("Input JSON contains no CR records")
 
     strictness = Strictness(args.strictness)
-    model = None
-    if os.getenv("GROQ_API_KEY") or os.getenv("HF_TOKEN"):
-        try:
-            model = build_provider(args.provider)
-        except Exception as exc:
-            print(f"LLM unavailable: {type(exc).__name__}: {exc}; continuing with deterministic evaluation only.")
-    else:
-        print("No GPT-OSS credentials detected; continuing with deterministic validation only.")
+    if not (os.getenv("GROQ_API_KEY") or os.getenv("HF_TOKEN")):
+        raise SystemExit(
+            "GPT-OSS 120B credentials not detected. Set GROQ_API_KEY or HF_TOKEN; "
+            "the main runner will not silently fall back to deterministic-only mode."
+        )
 
+    try:
+        model = build_provider(args.provider)
+    except Exception as exc:
+        raise SystemExit(f"Could not initialize GPT-OSS 120B provider: {type(exc).__name__}: {exc}") from exc
+
+    print(f"LLM provider: {getattr(model, 'model_name', type(model).__name__)}")
     memory = SQLiteUnifiedMemory(Path(".pre_cab") / "memory.sqlite3")
     audit = SQLiteAuditStore(Path(".pre_cab") / "audit.sqlite3")
 
