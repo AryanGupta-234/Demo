@@ -19,12 +19,20 @@ without that validation step having happened.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from .schemas import FindingSeverity
+
+# Same field precedence and header format as scripts/mine_field_requirements.py --
+# kept in sync manually since the two are separate concerns (mine vs. apply).
+NOTE_FIELDS = ["Comments and Work notes", "Work notes"]
+_NOTE_HEADER_RE = re.compile(r"\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2} - [^()]+?\([^)]*\)\s*")
+NOTE_SIGNAL_MAX_MATCHES = 5
+NOTE_SIGNAL_WARNING_LIFT = 10.0
 
 DEFAULT_RULE_TABLE_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "field_requirements.generated.json"
 
@@ -75,11 +83,23 @@ class FieldRequirementFinding:
 
 
 @dataclass(frozen=True)
+class WorkNoteSignal:
+    phrase: str
+    matched_text: str
+    lift: float
+    confidence: float
+    severity: FindingSeverity
+    evidence: str
+
+
+@dataclass(frozen=True)
 class FieldRequirementReport:
     category: str
     sub_category: str
     resolved_scope: str
     findings: list[FieldRequirementFinding] = field(default_factory=list)
+    note_signals: list[WorkNoteSignal] = field(default_factory=list)
+    in_scope: bool = True
 
     @property
     def blocking(self) -> list[FieldRequirementFinding]:
@@ -151,6 +171,20 @@ class FieldRequirementEngine:
     def evaluate(self, cr: dict[str, Any]) -> FieldRequirementReport:
         category = _text(cr.get("Category")) or "Unknown"
         sub_category = _text(cr.get("Sub Category")) or "Unknown"
+
+        # Emergency changes are outside Pre-CAB scope by design (they don't go
+        # through the CAB call this system supports) and must never be scored
+        # against Normal-change field patterns -- an Emergency CR missing a
+        # normally-required field is not a Pre-CAB finding, it's a category error.
+        change_type = _text(cr.get("Type")).lower()
+        if change_type == "emergency":
+            return FieldRequirementReport(
+                category=category,
+                sub_category=sub_category,
+                resolved_scope="out_of_scope:emergency",
+                in_scope=False,
+            )
+
         rules, scope, _bucket_support = self._resolve_fields(category, sub_category)
 
         findings: list[FieldRequirementFinding] = []
@@ -178,8 +212,52 @@ class FieldRequirementEngine:
             )
 
         return FieldRequirementReport(
-            category=category, sub_category=sub_category, resolved_scope=scope, findings=findings
+            category=category,
+            sub_category=sub_category,
+            resolved_scope=scope,
+            findings=findings,
+            note_signals=self.scan_work_notes(cr),
         )
+
+    def scan_work_notes(self, cr: dict[str, Any]) -> list[WorkNoteSignal]:
+        """Match a CR's own work notes against phrases historically seen before
+        rejected/cancelled CRs (see scripts/mine_field_requirements.py). This
+        reads the CR's *own* history/reasoning trail, not another CR's -- it
+        flags "this CR's notes already say things that preceded cancellation
+        before", which is meaningfully different from a field being blank.
+        """
+        if _text(cr.get("Type")).lower() == "emergency":
+            return []
+
+        note_text = ""
+        for field_name in NOTE_FIELDS:
+            value = cr.get(field_name)
+            if not _blank(value):
+                note_text = str(value)
+                break
+        if not note_text:
+            return []
+
+        body = _NOTE_HEADER_RE.sub(" ", note_text).lower()
+        signals = self._table.get("work_note_signals", [])
+        matches: list[WorkNoteSignal] = []
+        for rule in signals:
+            phrase = rule.get("phrase", "")
+            if phrase and phrase in body:
+                lift = float(rule.get("lift", 0))
+                severity = FindingSeverity.WARNING if lift >= NOTE_SIGNAL_WARNING_LIFT else FindingSeverity.INFO
+                matches.append(
+                    WorkNoteSignal(
+                        phrase=phrase,
+                        matched_text=phrase,
+                        lift=lift,
+                        confidence=float(rule.get("confidence", 0.5)),
+                        severity=severity,
+                        evidence=str(rule.get("evidence", "")),
+                    )
+                )
+        matches.sort(key=lambda m: -m.lift)
+        return matches[:NOTE_SIGNAL_MAX_MATCHES]
 
     @staticmethod
     def _is_satisfied(field_name: str, rule: dict[str, Any], value: Any) -> bool:

@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +39,35 @@ DESCRIPTIVE_FIELDS = [
     "Configuration item",
     "Risk",
     "Priority",
+    "Risk and impact analysis",
+    "Environment",
+    "Change Class",
 ]
+
+# Free-text history/reasoning fields. Not scored by fill-rate (they're near-100%
+# filled with trivial "CR created" noise) -- mined separately for *content* by
+# mine_work_note_signals below.
+NOTE_FIELDS = ["Comments and Work notes", "Work notes"]
+
+# Outcome fields used only to label historical CRs for the note-signal miner.
+# They are never themselves treated as intake requirements: a CR author doesn't
+# "fill in" its own Approval/CAB recommendation, CAB does.
+OUTCOME_FIELD_APPROVAL = "Approval"
+OUTCOME_FIELD_CAB_RECOMMENDATION = "CAB recommendation"
+
+_NEGATIVE_APPROVAL_VALUES = {"rejected"}
+
+# ServiceNow work-note entries are logged as "DD-MM-YYYY HH:MM:SS - Author Name
+# (Work notes)\n<body>". Strip the header so mining sees content, not authors/timestamps.
+_NOTE_HEADER_RE = re.compile(r"\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2} - ([^()]+?)\s*\([^)]*\)\s*")
+_WORD_RE = re.compile(r"[a-zA-Z][a-zA-Z\-]{2,}")
+_STOPWORDS = frozenset(
+    "the a an is are was were to of and or for in on at by with this that from "
+    "as it its into be been being will would can could should not no yes".split()
+)
+NOTE_SIGNAL_MIN_NEGATIVE_SUPPORT = 4
+NOTE_SIGNAL_MIN_LIFT = 3.0
+NOTE_SIGNAL_TOP_N = 30
 
 # Fields whose *disposition* matters (Yes / No / Not Applicable evidence-signoff
 # style fields). These need applicability + compliance separated out, because a
@@ -141,6 +170,101 @@ def _signoff_rule(field: str, records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _note_text(record: dict[str, Any]) -> str:
+    for field in NOTE_FIELDS:
+        value = record.get(field)
+        if not _blank(value):
+            return str(value)
+    return ""
+
+
+def _outcome_label(record: dict[str, Any]) -> str | None:
+    """Historical label used only to mine work-note language, never to grade a live CR."""
+    approval = _norm(record.get(OUTCOME_FIELD_APPROVAL))
+    cab_recommendation = _norm(record.get(OUTCOME_FIELD_CAB_RECOMMENDATION))
+    if approval in _NEGATIVE_APPROVAL_VALUES or "cancel" in cab_recommendation:
+        return "negative"
+    if approval == "approved":
+        return "positive"
+    return None
+
+
+def _extract_author_tokens(note_text: str) -> set[str]:
+    tokens: set[str] = set()
+    for match in _NOTE_HEADER_RE.finditer(note_text):
+        tokens.update(w.lower() for w in _WORD_RE.findall(match.group(1)) if len(w) > 2)
+    return tokens
+
+
+def _strip_headers(note_text: str) -> str:
+    return _NOTE_HEADER_RE.sub(" ", note_text)
+
+
+def _ngrams(text: str, n: int, author_tokens: set[str]) -> set[str]:
+    words = [w.lower() for w in _WORD_RE.findall(text) if w.lower() not in _STOPWORDS]
+    grams = {" ".join(words[i : i + n]) for i in range(len(words) - n + 1)}
+    # Drop grams that are entirely author-name tokens (routine approver/assignee
+    # names cluster around cancellations for organizational reasons, not content
+    # reasons -- keep phrases that mix a name with real content, drop pure names).
+    return {g for g in grams if not all(tok in author_tokens for tok in g.split())}
+
+
+def mine_work_note_signals(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Learn which work-note language historically preceded a rejected/cancelled CR.
+
+    This is a frequency-lift heuristic over a genuinely small historical sample
+    (a few hundred negative-labeled CRs at most) -- treat every phrase here as a
+    CANDIDATE worth a human glance, not a validated policy. It is deliberately
+    explainable (raw counts, not a black-box score) so that glance is easy.
+    """
+    labeled = [(r, _outcome_label(r)) for r in records]
+    negative = [r for r, label in labeled if label == "negative"]
+    positive = [r for r, label in labeled if label == "positive"]
+    if not negative:
+        return []
+
+    author_tokens: set[str] = set()
+    for record in records:
+        author_tokens |= _extract_author_tokens(_note_text(record))
+
+    def phrase_counts(subset: list[dict[str, Any]]) -> Counter[str]:
+        counts: Counter[str] = Counter()
+        for record in subset:
+            body = _strip_headers(_note_text(record))
+            for n in (1, 2, 3):
+                counts.update(_ngrams(body, n, author_tokens))
+        return counts
+
+    negative_counts = phrase_counts(negative)
+    positive_counts = phrase_counts(positive)
+
+    candidates = []
+    for phrase, neg_support in negative_counts.items():
+        if neg_support < NOTE_SIGNAL_MIN_NEGATIVE_SUPPORT:
+            continue
+        pos_support = positive_counts.get(phrase, 0)
+        neg_rate = neg_support / len(negative)
+        pos_rate = (pos_support + 1) / (len(positive) + 1)  # Laplace-smoothed
+        lift = neg_rate / pos_rate
+        if lift < NOTE_SIGNAL_MIN_LIFT:
+            continue
+        candidates.append(
+            {
+                "phrase": phrase,
+                "lift": round(lift, 2),
+                "negative_support": neg_support,
+                "positive_support": pos_support,
+                "confidence": _confidence_from_support(neg_support),
+                "evidence": (
+                    f"Seen in {neg_support}/{len(negative)} historical CRs later rejected/cancelled, "
+                    f"vs {pos_support}/{len(positive)} approved CRs."
+                ),
+            }
+        )
+    candidates.sort(key=lambda c: (-c["lift"], -c["negative_support"]))
+    return candidates[:NOTE_SIGNAL_TOP_N]
+
+
 def mine(records: list[dict[str, Any]]) -> dict[str, Any]:
     normal = [r for r in records if _norm(r.get("Type")) == "normal"]
 
@@ -200,6 +324,7 @@ def mine(records: list[dict[str, Any]]) -> dict[str, Any]:
         "buckets": bucket_rules,
         "categories": category_rules,
         "global": global_rules,
+        "work_note_signals": mine_work_note_signals(normal),
     }
 
 
@@ -225,7 +350,8 @@ def main() -> None:
     print(
         f"Mined {table['normal_record_count']} Normal CRs into "
         f"{len(table['buckets'])} category/sub-category rules "
-        f"(+{len(table['categories'])} category-level fallback rules) -> {out_path}"
+        f"(+{len(table['categories'])} category-level fallback rules) "
+        f"and {len(table['work_note_signals'])} work-note risk-language signals -> {out_path}"
     )
 
 

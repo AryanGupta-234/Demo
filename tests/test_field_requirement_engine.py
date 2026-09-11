@@ -136,3 +136,58 @@ def test_missing_rule_table_degrades_to_empty_global_without_crashing(tmp_path):
     report = engine.evaluate({"Category": "Any", "Sub Category": "Thing"})
     assert report.findings == []
     assert engine.lifecycle_status == "MISSING"
+
+
+def _table_with_note_signal():
+    table = _table()
+    table["work_note_signals"] = [
+        {
+            "phrase": "wrong category",
+            "lift": 39.7,
+            "negative_support": 7,
+            "positive_support": 0,
+            "confidence": 0.9,
+            "evidence": "Seen in 7/285 rejected/cancelled CRs, vs 0/1615 approved CRs.",
+        }
+    ]
+    return table
+
+
+def test_emergency_cr_is_out_of_scope_and_untouched():
+    engine = FieldRequirementEngine(table=_table_with_note_signal())
+    cr = {
+        "Type": "Emergency",
+        "Category": "Core",
+        "Sub Category": "branchchannel",
+        "Backout plan": "",
+        "Comments and Work notes": "raised wrong category, please cancel",
+    }
+    report = engine.evaluate(cr)
+    assert not report.in_scope
+    assert report.resolved_scope == "out_of_scope:emergency"
+    assert report.findings == []
+    assert report.note_signals == []
+
+
+def test_work_note_phrase_match_is_surfaced_with_evidence():
+    engine = FieldRequirementEngine(table=_table_with_note_signal())
+    cr = {
+        "Type": "Normal",
+        "Category": "Core",
+        "Sub Category": "branchchannel",
+        "Backout plan": "Restore from snapshot.",
+        "Comments and Work notes": (
+            "12-08-2026 12:05:09 - Jane Doe (Work notes)\nRaised under wrong category, please cancel.\n"
+        ),
+    }
+    report = engine.evaluate(cr)
+    assert len(report.note_signals) == 1
+    assert report.note_signals[0].phrase == "wrong category"
+    assert report.note_signals[0].severity == FindingSeverity.WARNING
+
+
+def test_no_note_text_yields_no_signals():
+    engine = FieldRequirementEngine(table=_table_with_note_signal())
+    cr = {"Type": "Normal", "Category": "Core", "Sub Category": "branchchannel"}
+    report = engine.evaluate(cr)
+    assert report.note_signals == []

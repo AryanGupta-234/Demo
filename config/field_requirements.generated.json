@@ -1,7 +1,7 @@
 {
   "rule_table_version": 1,
   "lifecycle_status": "CANDIDATE",
-  "generated_at": "2026-09-10T20:01:33.692219+00:00",
+  "generated_at": "2026-09-11T04:24:27.571482+00:00",
   "source_record_count": 3548,
   "normal_record_count": 2013,
   "min_support_for_bucket_rule": 5,
@@ -123,6 +123,30 @@
           "fill_rate": 1.0,
           "confidence": 0.862,
           "evidence": "Populated in 8/8 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 8,
+          "fill_rate": 1.0,
+          "confidence": 0.862,
+          "evidence": "Populated in 8/8 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 8,
+          "fill_rate": 0.0,
+          "confidence": 0.862,
+          "evidence": "Populated in 0/8 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 8,
+          "fill_rate": 0.0,
+          "confidence": 0.862,
+          "evidence": "Populated in 0/8 historical Normal CRs in this bucket."
         },
         "UAT signoff": {
           "kind": "signoff",
@@ -254,6 +278,30 @@
           "evidence": "Populated in 41/41 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 41,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 41/41 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 41,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 41/41 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 41,
+          "fill_rate": 0.512,
+          "confidence": 0.97,
+          "evidence": "Populated in 21/41 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 41,
@@ -398,6 +446,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 68/68 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 68,
+          "fill_rate": 0.985,
+          "confidence": 0.97,
+          "evidence": "Populated in 67/68 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 68,
+          "fill_rate": 0.25,
+          "confidence": 0.97,
+          "evidence": "Populated in 17/68 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 68,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 68/68 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -528,6 +600,30 @@
           "evidence": "Populated in 650/654 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 654,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 654/654 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 654,
+          "fill_rate": 0.985,
+          "confidence": 0.97,
+          "evidence": "Populated in 644/654 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 654,
+          "fill_rate": 0.251,
+          "confidence": 0.97,
+          "evidence": "Populated in 164/654 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 654,
@@ -672,6 +768,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 331/331 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 331,
+          "fill_rate": 0.982,
+          "confidence": 0.97,
+          "evidence": "Populated in 325/331 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 331,
+          "fill_rate": 0.311,
+          "confidence": 0.97,
+          "evidence": "Populated in 103/331 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 331,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 331/331 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -802,6 +922,30 @@
           "evidence": "Populated in 69/73 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 73,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 73/73 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 73,
+          "fill_rate": 0.986,
+          "confidence": 0.97,
+          "evidence": "Populated in 72/73 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 73,
+          "fill_rate": 0.178,
+          "confidence": 0.97,
+          "evidence": "Populated in 13/73 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 73,
@@ -946,6 +1090,30 @@
           "confidence": 0.931,
           "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 12,
+          "fill_rate": 1.0,
+          "confidence": 0.931,
+          "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 12,
+          "fill_rate": 0.167,
+          "confidence": 0.931,
+          "evidence": "Populated in 2/12 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 12,
+          "fill_rate": 1.0,
+          "confidence": 0.931,
+          "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "CONDITIONAL",
@@ -1076,6 +1244,30 @@
           "evidence": "Populated in 76/78 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 78,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 78/78 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 78,
+          "fill_rate": 0.987,
+          "confidence": 0.97,
+          "evidence": "Populated in 77/78 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 78,
+          "fill_rate": 0.385,
+          "confidence": 0.97,
+          "evidence": "Populated in 30/78 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 78,
@@ -1220,6 +1412,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 149/149 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 149,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 149/149 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 149,
+          "fill_rate": 0.376,
+          "confidence": 0.97,
+          "evidence": "Populated in 56/149 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 149,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 149/149 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "REQUIRED",
@@ -1350,6 +1566,30 @@
           "evidence": "Populated in 74/75 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 75,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 75/75 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 75,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 75/75 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 75,
+          "fill_rate": 0.227,
+          "confidence": 0.97,
+          "evidence": "Populated in 17/75 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 75,
@@ -1494,6 +1734,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 47/47 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 47,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 47/47 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 47,
+          "fill_rate": 0.362,
+          "confidence": 0.97,
+          "evidence": "Populated in 17/47 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 47,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 47/47 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "CONDITIONAL",
@@ -1624,6 +1888,30 @@
           "evidence": "Populated in 5/5 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 5,
+          "fill_rate": 1.0,
+          "confidence": 0.786,
+          "evidence": "Populated in 5/5 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 5,
+          "fill_rate": 1.0,
+          "confidence": 0.786,
+          "evidence": "Populated in 5/5 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 5,
+          "fill_rate": 0.6,
+          "confidence": 0.786,
+          "evidence": "Populated in 3/5 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 5,
@@ -1768,6 +2056,30 @@
           "confidence": 0.786,
           "evidence": "Populated in 5/5 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 5,
+          "fill_rate": 1.0,
+          "confidence": 0.786,
+          "evidence": "Populated in 5/5 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 5,
+          "fill_rate": 0.0,
+          "confidence": 0.786,
+          "evidence": "Populated in 0/5 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 5,
+          "fill_rate": 0.0,
+          "confidence": 0.786,
+          "evidence": "Populated in 0/5 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "CONDITIONAL",
@@ -1905,6 +2217,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 80/80 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 80,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 80/80 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 80,
+          "fill_rate": 0.263,
+          "confidence": 0.97,
+          "evidence": "Populated in 21/80 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 80,
+          "fill_rate": 0.988,
+          "confidence": 0.97,
+          "evidence": "Populated in 79/80 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -2035,6 +2371,30 @@
           "evidence": "Populated in 10/10 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 10,
+          "fill_rate": 1.0,
+          "confidence": 0.9,
+          "evidence": "Populated in 10/10 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 10,
+          "fill_rate": 1.0,
+          "confidence": 0.9,
+          "evidence": "Populated in 10/10 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 10,
+          "fill_rate": 0.2,
+          "confidence": 0.9,
+          "evidence": "Populated in 2/10 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 10,
@@ -2179,6 +2539,30 @@
           "confidence": 0.958,
           "evidence": "Populated in 14/14 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 14,
+          "fill_rate": 1.0,
+          "confidence": 0.958,
+          "evidence": "Populated in 14/14 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 14,
+          "fill_rate": 0.643,
+          "confidence": 0.958,
+          "evidence": "Populated in 9/14 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 14,
+          "fill_rate": 1.0,
+          "confidence": 0.958,
+          "evidence": "Populated in 14/14 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "REQUIRED",
@@ -2309,6 +2693,30 @@
           "evidence": "Populated in 109/109 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 109,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 109/109 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 109,
+          "fill_rate": 0.982,
+          "confidence": 0.97,
+          "evidence": "Populated in 107/109 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 109,
+          "fill_rate": 0.303,
+          "confidence": 0.97,
+          "evidence": "Populated in 33/109 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 109,
@@ -2453,6 +2861,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 23/23 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 23,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 23/23 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 23,
+          "fill_rate": 0.435,
+          "confidence": 0.97,
+          "evidence": "Populated in 10/23 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 23,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 23/23 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "REQUIRED",
@@ -2583,6 +3015,30 @@
           "evidence": "Populated in 18/18 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 18,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 18/18 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 18,
+          "fill_rate": 0.889,
+          "confidence": 0.97,
+          "evidence": "Populated in 16/18 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 18,
+          "fill_rate": 0.5,
+          "confidence": 0.97,
+          "evidence": "Populated in 9/18 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 18,
@@ -2727,6 +3183,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 80/80 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 80,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 80/80 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 80,
+          "fill_rate": 0.412,
+          "confidence": 0.97,
+          "evidence": "Populated in 33/80 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 80,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 80/80 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -2857,6 +3337,30 @@
           "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 12,
+          "fill_rate": 1.0,
+          "confidence": 0.931,
+          "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 12,
+          "fill_rate": 1.0,
+          "confidence": 0.931,
+          "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 12,
+          "fill_rate": 0.667,
+          "confidence": 0.931,
+          "evidence": "Populated in 8/12 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 12,
@@ -3001,6 +3505,30 @@
           "confidence": 0.945,
           "evidence": "Populated in 13/13 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 13,
+          "fill_rate": 1.0,
+          "confidence": 0.945,
+          "evidence": "Populated in 13/13 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 13,
+          "fill_rate": 0.923,
+          "confidence": 0.945,
+          "evidence": "Populated in 12/13 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 13,
+          "fill_rate": 1.0,
+          "confidence": 0.945,
+          "evidence": "Populated in 13/13 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -3131,6 +3659,30 @@
           "evidence": "Populated in 10/10 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 10,
+          "fill_rate": 1.0,
+          "confidence": 0.9,
+          "evidence": "Populated in 10/10 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 10,
+          "fill_rate": 1.0,
+          "confidence": 0.9,
+          "evidence": "Populated in 10/10 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 10,
+          "fill_rate": 0.7,
+          "confidence": 0.9,
+          "evidence": "Populated in 7/10 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 10,
@@ -3275,6 +3827,30 @@
           "confidence": 0.786,
           "evidence": "Populated in 5/5 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 5,
+          "fill_rate": 1.0,
+          "confidence": 0.786,
+          "evidence": "Populated in 5/5 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 5,
+          "fill_rate": 0.8,
+          "confidence": 0.786,
+          "evidence": "Populated in 4/5 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 5,
+          "fill_rate": 1.0,
+          "confidence": 0.786,
+          "evidence": "Populated in 5/5 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "REQUIRED",
@@ -3412,6 +3988,30 @@
           "confidence": 0.815,
           "evidence": "Populated in 6/6 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 6,
+          "fill_rate": 0.667,
+          "confidence": 0.815,
+          "evidence": "Populated in 4/6 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 6,
+          "fill_rate": 0.5,
+          "confidence": 0.815,
+          "evidence": "Populated in 3/6 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 6,
+          "fill_rate": 0.833,
+          "confidence": 0.815,
+          "evidence": "Populated in 5/6 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -3542,6 +4142,30 @@
           "evidence": "Populated in 6/6 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 6,
+          "fill_rate": 1.0,
+          "confidence": 0.815,
+          "evidence": "Populated in 6/6 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 6,
+          "fill_rate": 1.0,
+          "confidence": 0.815,
+          "evidence": "Populated in 6/6 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 6,
+          "fill_rate": 0.0,
+          "confidence": 0.815,
+          "evidence": "Populated in 0/6 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 6,
@@ -3686,6 +4310,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 19/19 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 19,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 19/19 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 19,
+          "fill_rate": 0.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 0/19 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 19,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 19/19 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "NOT_OBSERVED",
@@ -3822,6 +4470,30 @@
           "fill_rate": 1.0,
           "confidence": 0.815,
           "evidence": "Populated in 6/6 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 6,
+          "fill_rate": 1.0,
+          "confidence": 0.815,
+          "evidence": "Populated in 6/6 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 6,
+          "fill_rate": 0.0,
+          "confidence": 0.815,
+          "evidence": "Populated in 0/6 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 6,
+          "fill_rate": 0.167,
+          "confidence": 0.815,
+          "evidence": "Populated in 1/6 historical Normal CRs in this bucket."
         },
         "UAT signoff": {
           "kind": "signoff",
@@ -3961,6 +4633,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 17/17 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 17,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 17/17 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 17,
+          "fill_rate": 0.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 0/17 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 17,
+          "fill_rate": 0.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 0/17 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -4090,6 +4786,30 @@
           "evidence": "Populated in 41/41 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 41,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 41/41 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 41,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 41/41 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 41,
+          "fill_rate": 0.512,
+          "confidence": 0.97,
+          "evidence": "Populated in 21/41 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 41,
@@ -4233,6 +4953,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 115/115 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 115,
+          "fill_rate": 0.991,
+          "confidence": 0.97,
+          "evidence": "Populated in 114/115 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 115,
+          "fill_rate": 0.296,
+          "confidence": 0.97,
+          "evidence": "Populated in 34/115 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 115,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 115/115 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "CONDITIONAL",
@@ -4362,6 +5106,30 @@
           "evidence": "Populated in 650/654 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 654,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 654/654 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 654,
+          "fill_rate": 0.985,
+          "confidence": 0.97,
+          "evidence": "Populated in 644/654 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 654,
+          "fill_rate": 0.251,
+          "confidence": 0.97,
+          "evidence": "Populated in 164/654 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 654,
@@ -4505,6 +5273,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 331/331 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 331,
+          "fill_rate": 0.982,
+          "confidence": 0.97,
+          "evidence": "Populated in 325/331 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 331,
+          "fill_rate": 0.311,
+          "confidence": 0.97,
+          "evidence": "Populated in 103/331 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 331,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 331/331 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -4634,6 +5426,30 @@
           "evidence": "Populated in 71/75 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 75,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 75/75 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 75,
+          "fill_rate": 0.987,
+          "confidence": 0.97,
+          "evidence": "Populated in 74/75 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 75,
+          "fill_rate": 0.173,
+          "confidence": 0.97,
+          "evidence": "Populated in 13/75 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 75,
@@ -4777,6 +5593,30 @@
           "confidence": 0.931,
           "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 12,
+          "fill_rate": 1.0,
+          "confidence": 0.931,
+          "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 12,
+          "fill_rate": 0.167,
+          "confidence": 0.931,
+          "evidence": "Populated in 2/12 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 12,
+          "fill_rate": 1.0,
+          "confidence": 0.931,
+          "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "CONDITIONAL",
@@ -4906,6 +5746,30 @@
           "evidence": "Populated in 76/78 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 78,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 78/78 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 78,
+          "fill_rate": 0.987,
+          "confidence": 0.97,
+          "evidence": "Populated in 77/78 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 78,
+          "fill_rate": 0.385,
+          "confidence": 0.97,
+          "evidence": "Populated in 30/78 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 78,
@@ -5049,6 +5913,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 149/149 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 149,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 149/149 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 149,
+          "fill_rate": 0.376,
+          "confidence": 0.97,
+          "evidence": "Populated in 56/149 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 149,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 149/149 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "REQUIRED",
@@ -5178,6 +6066,30 @@
           "evidence": "Populated in 110/111 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 111,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 111/111 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 111,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 111/111 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 111,
+          "fill_rate": 0.306,
+          "confidence": 0.97,
+          "evidence": "Populated in 34/111 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 111,
@@ -5321,6 +6233,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 17/17 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 17,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 17/17 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 17,
+          "fill_rate": 0.647,
+          "confidence": 0.97,
+          "evidence": "Populated in 11/17 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 17,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 17/17 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -5456,6 +6392,30 @@
           "fill_rate": 1.0,
           "confidence": 0.786,
           "evidence": "Populated in 5/5 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 5,
+          "fill_rate": 1.0,
+          "confidence": 0.786,
+          "evidence": "Populated in 5/5 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 5,
+          "fill_rate": 0.0,
+          "confidence": 0.786,
+          "evidence": "Populated in 0/5 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 5,
+          "fill_rate": 0.0,
+          "confidence": 0.786,
+          "evidence": "Populated in 0/5 historical Normal CRs in this bucket."
         },
         "UAT signoff": {
           "kind": "signoff",
@@ -5593,6 +6553,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 25/25 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 25,
+          "fill_rate": 0.92,
+          "confidence": 0.97,
+          "evidence": "Populated in 23/25 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 25,
+          "fill_rate": 0.4,
+          "confidence": 0.97,
+          "evidence": "Populated in 10/25 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 25,
+          "fill_rate": 0.76,
+          "confidence": 0.97,
+          "evidence": "Populated in 19/25 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -5729,6 +6713,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 87/87 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 87,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 87/87 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 87,
+          "fill_rate": 0.241,
+          "confidence": 0.97,
+          "evidence": "Populated in 21/87 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 87,
+          "fill_rate": 0.931,
+          "confidence": 0.97,
+          "evidence": "Populated in 81/87 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -5858,6 +6866,30 @@
           "evidence": "Populated in 20/20 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 20,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 20/20 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 20,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 20/20 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 20,
+          "fill_rate": 0.2,
+          "confidence": 0.97,
+          "evidence": "Populated in 4/20 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 20,
@@ -6001,6 +7033,30 @@
           "confidence": 0.958,
           "evidence": "Populated in 14/14 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 14,
+          "fill_rate": 1.0,
+          "confidence": 0.958,
+          "evidence": "Populated in 14/14 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 14,
+          "fill_rate": 0.643,
+          "confidence": 0.958,
+          "evidence": "Populated in 9/14 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 14,
+          "fill_rate": 1.0,
+          "confidence": 0.958,
+          "evidence": "Populated in 14/14 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "REQUIRED",
@@ -6130,6 +7186,30 @@
           "evidence": "Populated in 109/109 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 109,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 109/109 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 109,
+          "fill_rate": 0.982,
+          "confidence": 0.97,
+          "evidence": "Populated in 107/109 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 109,
+          "fill_rate": 0.303,
+          "confidence": 0.97,
+          "evidence": "Populated in 33/109 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 109,
@@ -6273,6 +7353,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 80/80 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 80,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 80/80 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "OPTIONAL",
+          "support": 80,
+          "fill_rate": 0.412,
+          "confidence": 0.97,
+          "evidence": "Populated in 33/80 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 80,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 80/80 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -6402,6 +7506,30 @@
           "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 12,
+          "fill_rate": 1.0,
+          "confidence": 0.931,
+          "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 12,
+          "fill_rate": 1.0,
+          "confidence": 0.931,
+          "evidence": "Populated in 12/12 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 12,
+          "fill_rate": 0.667,
+          "confidence": 0.931,
+          "evidence": "Populated in 8/12 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 12,
@@ -6545,6 +7673,30 @@
           "confidence": 0.945,
           "evidence": "Populated in 13/13 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 13,
+          "fill_rate": 1.0,
+          "confidence": 0.945,
+          "evidence": "Populated in 13/13 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 13,
+          "fill_rate": 0.923,
+          "confidence": 0.945,
+          "evidence": "Populated in 12/13 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 13,
+          "fill_rate": 1.0,
+          "confidence": 0.945,
+          "evidence": "Populated in 13/13 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -6681,6 +7833,30 @@
           "confidence": 0.815,
           "evidence": "Populated in 6/6 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 6,
+          "fill_rate": 0.667,
+          "confidence": 0.815,
+          "evidence": "Populated in 4/6 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 6,
+          "fill_rate": 0.5,
+          "confidence": 0.815,
+          "evidence": "Populated in 3/6 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "RECOMMENDED",
+          "support": 6,
+          "fill_rate": 0.833,
+          "confidence": 0.815,
+          "evidence": "Populated in 5/6 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "OPTIONAL",
@@ -6810,6 +7986,30 @@
           "evidence": "Populated in 6/6 historical Normal CRs in this bucket."
         },
         "Priority": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 6,
+          "fill_rate": 1.0,
+          "confidence": 0.815,
+          "evidence": "Populated in 6/6 historical Normal CRs in this bucket."
+        },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 6,
+          "fill_rate": 1.0,
+          "confidence": 0.815,
+          "evidence": "Populated in 6/6 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 6,
+          "fill_rate": 0.0,
+          "confidence": 0.815,
+          "evidence": "Populated in 0/6 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
           "kind": "descriptive",
           "requirement_level": "REQUIRED",
           "support": 6,
@@ -6953,6 +8153,30 @@
           "confidence": 0.97,
           "evidence": "Populated in 19/19 historical Normal CRs in this bucket."
         },
+        "Risk and impact analysis": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 19,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 19/19 historical Normal CRs in this bucket."
+        },
+        "Environment": {
+          "kind": "descriptive",
+          "requirement_level": "NOT_OBSERVED",
+          "support": 19,
+          "fill_rate": 0.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 0/19 historical Normal CRs in this bucket."
+        },
+        "Change Class": {
+          "kind": "descriptive",
+          "requirement_level": "REQUIRED",
+          "support": 19,
+          "fill_rate": 1.0,
+          "confidence": 0.97,
+          "evidence": "Populated in 19/19 historical Normal CRs in this bucket."
+        },
         "UAT signoff": {
           "kind": "signoff",
           "requirement_level": "NOT_OBSERVED",
@@ -7089,6 +8313,30 @@
         "confidence": 0.97,
         "evidence": "Populated in 2013/2013 historical Normal CRs in this bucket."
       },
+      "Risk and impact analysis": {
+        "kind": "descriptive",
+        "requirement_level": "REQUIRED",
+        "support": 2013,
+        "fill_rate": 0.988,
+        "confidence": 0.97,
+        "evidence": "Populated in 1988/2013 historical Normal CRs in this bucket."
+      },
+      "Environment": {
+        "kind": "descriptive",
+        "requirement_level": "OPTIONAL",
+        "support": 2013,
+        "fill_rate": 0.303,
+        "confidence": 0.97,
+        "evidence": "Populated in 609/2013 historical Normal CRs in this bucket."
+      },
+      "Change Class": {
+        "kind": "descriptive",
+        "requirement_level": "REQUIRED",
+        "support": 2013,
+        "fill_rate": 0.982,
+        "confidence": 0.97,
+        "evidence": "Populated in 1976/2013 historical Normal CRs in this bucket."
+      },
       "UAT signoff": {
         "kind": "signoff",
         "requirement_level": "CONDITIONAL",
@@ -7140,5 +8388,247 @@
         "evidence": "Of 2013 historical CRs, 1110 recorded a disposition (45 Yes / 298 No / 767 Not Applicable)."
       }
     }
-  }
+  },
+  "work_note_signals": [
+    {
+      "phrase": "raised wrong",
+      "lift": 56.7,
+      "negative_support": 10,
+      "positive_support": 0,
+      "confidence": 0.9,
+      "evidence": "Seen in 10/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "canceled",
+      "lift": 56.7,
+      "negative_support": 10,
+      "positive_support": 0,
+      "confidence": 0.9,
+      "evidence": "Seen in 10/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "requested discussed",
+      "lift": 51.03,
+      "negative_support": 9,
+      "positive_support": 0,
+      "confidence": 0.882,
+      "evidence": "Seen in 9/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "requested cancel",
+      "lift": 45.36,
+      "negative_support": 16,
+      "positive_support": 1,
+      "confidence": 0.97,
+      "evidence": "Seen in 16/285 historical CRs later rejected/cancelled, vs 1/1615 approved CRs."
+    },
+    {
+      "phrase": "cancellation requested cancel",
+      "lift": 45.36,
+      "negative_support": 16,
+      "positive_support": 1,
+      "confidence": 0.97,
+      "evidence": "Seen in 16/285 historical CRs later rejected/cancelled, vs 1/1615 approved CRs."
+    },
+    {
+      "phrase": "cancel new",
+      "lift": 45.36,
+      "negative_support": 8,
+      "positive_support": 0,
+      "confidence": 0.862,
+      "evidence": "Seen in 8/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "cancel new raised",
+      "lift": 45.36,
+      "negative_support": 8,
+      "positive_support": 0,
+      "confidence": 0.862,
+      "evidence": "Seen in 8/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "new raised chg",
+      "lift": 45.36,
+      "negative_support": 8,
+      "positive_support": 0,
+      "confidence": 0.862,
+      "evidence": "Seen in 8/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "wrong category",
+      "lift": 39.69,
+      "negative_support": 7,
+      "positive_support": 0,
+      "confidence": 0.84,
+      "evidence": "Seen in 7/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "cancel infra",
+      "lift": 39.69,
+      "negative_support": 7,
+      "positive_support": 0,
+      "confidence": 0.84,
+      "evidence": "Seen in 7/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "raised new one",
+      "lift": 39.69,
+      "negative_support": 7,
+      "positive_support": 0,
+      "confidence": 0.84,
+      "evidence": "Seen in 7/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "cancelled per",
+      "lift": 36.86,
+      "negative_support": 13,
+      "positive_support": 1,
+      "confidence": 0.945,
+      "evidence": "Seen in 13/285 historical CRs later rejected/cancelled, vs 1/1615 approved CRs."
+    },
+    {
+      "phrase": "cancelled per request",
+      "lift": 34.02,
+      "negative_support": 12,
+      "positive_support": 1,
+      "confidence": 0.931,
+      "evidence": "Seen in 12/285 historical CRs later rejected/cancelled, vs 1/1615 approved CRs."
+    },
+    {
+      "phrase": "raised wrong category",
+      "lift": 34.02,
+      "negative_support": 6,
+      "positive_support": 0,
+      "confidence": 0.815,
+      "evidence": "Seen in 6/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "cancellation requested discussed",
+      "lift": 34.02,
+      "negative_support": 6,
+      "positive_support": 0,
+      "confidence": 0.815,
+      "evidence": "Seen in 6/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "raised correct",
+      "lift": 34.02,
+      "negative_support": 6,
+      "positive_support": 0,
+      "confidence": 0.815,
+      "evidence": "Seen in 6/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "please cancel new",
+      "lift": 34.02,
+      "negative_support": 6,
+      "positive_support": 0,
+      "confidence": 0.815,
+      "evidence": "Seen in 6/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "cancel raised",
+      "lift": 29.77,
+      "negative_support": 21,
+      "positive_support": 3,
+      "confidence": 0.97,
+      "evidence": "Seen in 21/285 historical CRs later rejected/cancelled, vs 3/1615 approved CRs."
+    },
+    {
+      "phrase": "cancel raised new",
+      "lift": 28.35,
+      "negative_support": 10,
+      "positive_support": 1,
+      "confidence": 0.9,
+      "evidence": "Seen in 10/285 historical CRs later rejected/cancelled, vs 1/1615 approved CRs."
+    },
+    {
+      "phrase": "please cancel infra",
+      "lift": 28.35,
+      "negative_support": 5,
+      "positive_support": 0,
+      "confidence": 0.786,
+      "evidence": "Seen in 5/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "cancel reply",
+      "lift": 28.35,
+      "negative_support": 5,
+      "positive_support": 0,
+      "confidence": 0.786,
+      "evidence": "Seen in 5/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "please cancel reply",
+      "lift": 28.35,
+      "negative_support": 5,
+      "positive_support": 0,
+      "confidence": 0.786,
+      "evidence": "Seen in 5/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "cancellation requested new",
+      "lift": 28.35,
+      "negative_support": 5,
+      "positive_support": 0,
+      "confidence": 0.786,
+      "evidence": "Seen in 5/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "one chg",
+      "lift": 28.35,
+      "negative_support": 5,
+      "positive_support": 0,
+      "confidence": 0.786,
+      "evidence": "Seen in 5/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "new one chg",
+      "lift": 28.35,
+      "negative_support": 5,
+      "positive_support": 0,
+      "confidence": 0.786,
+      "evidence": "Seen in 5/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "correct chg",
+      "lift": 28.35,
+      "negative_support": 5,
+      "positive_support": 0,
+      "confidence": 0.786,
+      "evidence": "Seen in 5/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "company name",
+      "lift": 28.35,
+      "negative_support": 5,
+      "positive_support": 0,
+      "confidence": 0.786,
+      "evidence": "Seen in 5/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "canceled change",
+      "lift": 28.35,
+      "negative_support": 5,
+      "positive_support": 0,
+      "confidence": 0.786,
+      "evidence": "Seen in 5/285 historical CRs later rejected/cancelled, vs 0/1615 approved CRs."
+    },
+    {
+      "phrase": "please cancel raised",
+      "lift": 26.46,
+      "negative_support": 14,
+      "positive_support": 2,
+      "confidence": 0.958,
+      "evidence": "Seen in 14/285 historical CRs later rejected/cancelled, vs 2/1615 approved CRs."
+    },
+    {
+      "phrase": "new one",
+      "lift": 25.52,
+      "negative_support": 9,
+      "positive_support": 1,
+      "confidence": 0.882,
+      "evidence": "Seen in 9/285 historical CRs later rejected/cancelled, vs 1/1615 approved CRs."
+    }
+  ]
 }
