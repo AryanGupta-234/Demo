@@ -68,16 +68,21 @@ FIELD_POLICIES: tuple[FieldPolicy, ...] = (
     FieldPolicy("Customer Approval", "Customer approval", "approval", required_when=("customer-impact",), evidence_capable=True),
     FieldPolicy("UAT signoff", "UAT sign-off", "testing", required_when=("uat",), evidence_capable=True),
     FieldPolicy("Test Results Evidence", "Test results evidence", "testing", required_when=("testing-evidence",), evidence_capable=True),
+    # NOTE: "Planned start"/"Planned end" (not "...date") is what this org's ServiceNow
+    # export actually calls these fields once aliased -- see input_loader.normalize_cr_record.
     FieldPolicy("Planned start", "Planned start", "schedule", required_when=("production-change-window",)),
     FieldPolicy("Planned end", "Planned end", "schedule", required_when=("production-change-window",)),
     FieldPolicy("Affected Customers", "Affected customers", "business", required_when=("customer-impact",)),
-    FieldPolicy("Service impact", "Service impact", "business", required_when=("impact-detail",)),
-    FieldPolicy("Downtime", "Expected downtime", "business", required_when=("impact-detail",)),
-    FieldPolicy("Security review", "Security review / approval", "security", required_when=("security-change",), evidence_capable=True),
-    FieldPolicy("Privacy review", "Privacy / data review", "security", required_when=("sensitive-data",), evidence_capable=True),
-    FieldPolicy("Database validation", "Database validation / recovery", "technical", required_when=("database-change",), evidence_capable=True),
-    FieldPolicy("Network approval", "Network / firewall approval", "technical", required_when=("network-change",), evidence_capable=True),
-    FieldPolicy("Monitoring plan", "Post-change monitoring", "operations", required_when=("high-impact",)),
+    # "Service impact", "Downtime", "Security review", "Privacy review", "Database
+    # validation", "Network approval", "Monitoring plan" were deliberately removed from
+    # this list. They do not exist as fields anywhere in this org's real ServiceNow
+    # export (verified against 3,548 real historical CR records across 141 distinct
+    # field names) -- they were generic ServiceNow-textbook field names, not this
+    # org's schema, so every real CR was being flagged MISSING for fields it can
+    # never populate. The underlying concerns (impact detail, security/privacy
+    # relevance, DB/network risk, monitoring) are still surfaced -- see the
+    # advisory-only ApplicabilitySignal entries in contextual_signals() below,
+    # which report applicability without demanding a field that isn't there.
 )
 
 

@@ -14,3 +14,4 @@ venv/
 artifacts/
 real_data/
 private_data/
+src/*.egg-info/

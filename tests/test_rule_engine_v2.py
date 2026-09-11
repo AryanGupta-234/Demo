@@ -65,7 +65,7 @@ def test_infrastructure_patch_does_not_force_uat():
 def test_missing_contextual_field_is_evaluated_by_decision_gate():
     cr = base_cr(**{"Customer Approval": ""})
     result = validate_fields(cr, Strictness.BALANCED)
-    assert any(f.code == "MISSING_Customer_Approval" for f in result.findings)
+    assert any(f.code == "MISSING_CUSTOMER_APPROVAL" for f in result.findings)
     assert result.decision == Decision.CONDITIONAL
 
 

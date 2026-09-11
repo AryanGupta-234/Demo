@@ -72,6 +72,13 @@ def normalize_cr_record(record: dict[str, Any]) -> dict[str, Any]:
         "Category": ("Category", "category"),
         "Sub Category": ("Sub Category", "Subcategory", "sub_category", "subcategory"),
         "Conflict status": ("Conflict status", "Conflict Status", "conflict_status"),
+        "Planned start": ("Planned start", "Planned start date", "planned_start_date", "Start date"),
+        "Planned end": ("Planned end", "Planned end date", "planned_end_date", "End date"),
+        "Environment": ("Environment", "environment", "Target environment"),
+        "TCS QA signoff": ("TCS QA signoff", "tcs_qa_signoff", "QA signoff"),
+        "Lower Environment Reference CR/SR": (
+            "Lower Environment Reference CR/SR", "Lower Environment Reference", "lower_environment_reference",
+        ),
     }
     for canonical, names in aliases.items():
         value = first_value(record, *names)
