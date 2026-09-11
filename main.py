@@ -12,8 +12,8 @@ from pre_cab.env_loader import load_dotenv
 from pre_cab.input_loader import load_cr_records, source_id
 from pre_cab.pipeline import run_pre_cab
 from pre_cab.persistent_memory import SQLiteUnifiedMemory
-from pre_cab.provider_factory import build_provider
 from pre_cab.reporting import build_report
+from pre_cab.runtime_provider import build_runtime_provider
 from pre_cab.schemas import Strictness
 
 
@@ -33,7 +33,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="One-command Pre-CAB validation for one or many CRs")
     parser.add_argument("cr_json", type=Path)
     parser.add_argument("--strictness", choices=[s.value for s in Strictness], default="balanced")
-    parser.add_argument("--provider", choices=["auto", "cerebras", "groq", "huggingface"], default="auto")
+    parser.add_argument("--provider", choices=["auto", "cerebras", "groq", "huggingface"], default=None)
     parser.add_argument("--attachment-root", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/pre_cab"))
     args = parser.parse_args()
@@ -41,13 +41,11 @@ def main() -> int:
     records = load_cr_records(args.cr_json)
     if not records:
         raise SystemExit("Input JSON contains no CR records")
-
-    strictness = Strictness(args.strictness)
     if not any(os.getenv(name) for name in ("CEREBRAS_API_KEY", "GROQ_API_KEY", "HF_TOKEN")):
-        raise SystemExit("GPT-OSS 120B credentials not detected after loading .env. Set CEREBRAS_API_KEY, GROQ_API_KEY, or HF_TOKEN.")
+        raise SystemExit("GPT-OSS 120B credentials not detected after loading .env. Set a provider key in .env or the shell.")
 
     try:
-        model = build_provider(args.provider)
+        model = build_runtime_provider(args.provider)
     except Exception as exc:
         raise SystemExit(f"Could not initialize GPT-OSS 120B provider: {type(exc).__name__}: {exc}") from exc
 
@@ -60,10 +58,10 @@ def main() -> int:
         number = source_id(cr)
         print(f"[{index}/{len(records)}] Processing {number}...")
         try:
-            result = run_pre_cab(cr, strictness=strictness, model=model, memory=memory, attachment_root=args.attachment_root)
+            result = run_pre_cab(cr, strictness=Strictness(args.strictness), model=model, memory=memory, attachment_root=args.attachment_root)
             report = build_report(result.stage1, stage2=result.stage2)
             report.update({"cr_number": number, "final_decision": result.final_decision.value, "documents_analyzed": len(result.documents), "final_reasoning": result.stage1.metadata.get("brain", {}), "llm_model": getattr(model, "model_name", None)})
-            run_id = audit.record(cr_number=number, strictness=strictness.value, stage1_decision=result.stage1.decision.value, stage2_decision=result.stage2.decision.value if result.stage2 else None, final_decision=result.final_decision.value, model=getattr(model, "model_name", None), payload=report)
+            run_id = audit.record(cr_number=number, strictness=args.strictness, stage1_decision=result.stage1.decision.value, stage2_decision=result.stage2.decision.value if result.stage2 else None, final_decision=result.final_decision.value, model=getattr(model, "model_name", None), payload=report)
             report["run_id"] = run_id
             args.output_dir.mkdir(parents=True, exist_ok=True)
             (args.output_dir / f"{number}_pre_cab.json").write_text(json.dumps(report, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
@@ -93,7 +91,8 @@ def main() -> int:
     else:
         counts = {"PASS": 0, "CONDITIONAL": 0, "NOT_READY": 0, "ERROR": 0}
         for report in reports:
-            counts[str(report.get("final_decision", "ERROR"))] = counts.get(str(report.get("final_decision", "ERROR")), 0) + 1
+            decision = str(report.get("final_decision", "ERROR"))
+            counts[decision] = counts.get(decision, 0) + 1
         print(f"\nPRE-CAB BATCH: {len(reports)} CRs | PASS={counts['PASS']} CONDITIONAL={counts['CONDITIONAL']} NOT_READY={counts['NOT_READY']} ERROR={counts['ERROR']}")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
