@@ -140,9 +140,7 @@ def _print_batch_summary(reports: list[dict[str, Any]]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="One-command Pre-CAB validation for one or many CRs"
-    )
+    parser = argparse.ArgumentParser(description="One-command Pre-CAB validation for one or many CRs")
     parser.add_argument("cr_json", type=Path, help="JSON containing one CR or a batch of CR records")
     parser.add_argument("--strictness", choices=[s.value for s in Strictness], default="balanced")
     parser.add_argument("--provider", choices=["auto", "groq", "huggingface"], default="auto")
@@ -177,6 +175,7 @@ def main() -> int:
             print(f"LLM unavailable: {type(exc).__name__}: {exc}; continuing with deterministic evaluation only.")
     else:
         print("No GPT-OSS credentials detected; continuing with deterministic validation only.")
+
     memory = SQLiteUnifiedMemory(Path(".pre_cab") / "memory.sqlite3")
     audit = SQLiteAuditStore(Path(".pre_cab") / "audit.sqlite3")
 
@@ -222,10 +221,6 @@ def main() -> int:
     )
     print(f"\nResults: {batch_path}")
     return 0 if all(report.get("final_decision") != "ERROR" for report in reports) else 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
 
 
 if __name__ == "__main__":
