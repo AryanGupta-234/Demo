@@ -7,6 +7,7 @@ from typing import Any
 
 from .evidence import EvidenceDocument, EvidenceResult, verify_attachments
 from .final_reasoning import FinalReasoningResult, reconcile_final_decision, run_final_reasoning
+from .input_loader import normalize_cr_record
 from .local_attachments import load_attachments_for_cr
 from .orchestrator import run_stage1
 from .schemas import Decision, Strictness
@@ -38,17 +39,27 @@ def run_pre_cab(
     model: Any = None,
     memory: Any = None,
 ) -> FinalPipelineResult:
-    """Evaluate a Normal CR, verify evidence, then run one evidence-aware GPT synthesis.
+    """Evaluate a CR through normalization, deterministic agents, optional evidence, and GPT reasoning.
 
-    Free-tier behavior intentionally avoids a Stage-1 model call. Deterministic specialists first
-    decide whether the CR can progress to document verification; GPT-OSS is reserved for the final
-    high-value reasoning pass after ranked attachment excerpts and historical memory are available.
+    Normalization happens at the pipeline boundary so callers cannot accidentally bypass canonical
+    ServiceNow field aliases. The generative brain still runs for NOT_READY cases so CAB reviewers get
+    a complete explanation instead of a checklist-only early exit; deterministic blockers remain final
+    safety constraints and the model can only make the outcome more conservative.
     """
-    stage1_result = run_stage1(cr, strictness=strictness, model=None, memory=memory)
+    canonical_cr = normalize_cr_record(cr)
+
+    # Specialist agents are deterministic preprocessing; GPT-OSS is reserved for the high-value
+    # synthesis pass in ``run_final_reasoning`` to control free-tier usage.
+    stage1_result = run_stage1(canonical_cr, strictness=strictness, model=None, memory=memory)
     collected = list(documents or [])
 
     if attachment_root is not None:
-        cr_number = str(cr.get("Number") or cr.get("Effective number") or "").strip()
+        cr_number = str(
+            canonical_cr.get("Number")
+            or canonical_cr.get("Effective number")
+            or canonical_cr.get("change_number")
+            or ""
+        ).strip()
         collected.extend(load_attachments_for_cr(Path(attachment_root), cr_number))
 
     deduped: list[EvidenceDocument] = []
@@ -59,25 +70,26 @@ def run_pre_cab(
         seen.add(document.ref)
         deduped.append(document)
 
-    if stage1_result.stage1.decision == Decision.NOT_READY:
-        return FinalPipelineResult(
-            stage1=stage1_result.stage1,
-            stage2=None,
-            final_decision=Decision.NOT_READY,
-            documents=deduped,
-            final_reasoning=None,
+    # Evidence verification is meaningful only when documents are actually supplied. JSON-only
+    # validation should not invent an evidence penalty merely because attachments are absent.
+    stage2: EvidenceResult | None = None
+    if deduped:
+        stage2 = verify_attachments(
+            canonical_cr,
+            deduped,
+            requirements=stage1_result.stage1.requirements,
+            strictness=strictness,
         )
 
-    stage2 = verify_attachments(
-        cr,
-        deduped,
-        requirements=stage1_result.stage1.requirements,
-        strictness=strictness,
+    deterministic_final = _merge_decisions(
+        stage1_result.stage1.decision,
+        stage2.decision if stage2 is not None else None,
     )
-    deterministic_final = _merge_decisions(stage1_result.stage1.decision, stage2.decision)
 
+    # Always run the generative brain, including NOT_READY cases. The model explains the decision,
+    # identifies uncertainty and remediation; it cannot upgrade a deterministic blocker.
     reasoning = run_final_reasoning(
-        cr,
+        canonical_cr,
         stage1_result.stage1,
         stage2,
         strictness=strictness,
@@ -91,8 +103,12 @@ def run_pre_cab(
 
     payload = reasoning.payload or {}
     if payload:
-        stage1_result.stage1.cab_summary = str(payload.get("cab_reasoning") or stage1_result.stage1.cab_summary)
-        stage1_result.stage1.technical_summary = str(payload.get("technical_reasoning") or stage1_result.stage1.technical_summary)
+        stage1_result.stage1.cab_summary = str(
+            payload.get("cab_reasoning") or stage1_result.stage1.cab_summary
+        )
+        stage1_result.stage1.technical_summary = str(
+            payload.get("technical_reasoning") or stage1_result.stage1.technical_summary
+        )
         confidence = payload.get("confidence")
         if isinstance(confidence, (int, float)):
             stage1_result.stage1.confidence = min(
