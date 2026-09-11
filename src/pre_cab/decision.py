@@ -1,6 +1,7 @@
 """Deterministic guardrails for final Pre-CAB decisions."""
 from __future__ import annotations
 
+from .field_requirement_engine import FieldRequirementEngine, RequirementLevel
 from .input_loader import normalize_change_type
 from .requirements import infer_requirements
 from .rules import context_flags, field_quality, required_field_policies
@@ -11,6 +12,14 @@ STRICTNESS_PENALTIES = {
     Strictness.BALANCED: {"warning": 5},
     Strictness.STRICT: {"warning": 10},
 }
+
+# Shared engine instance: loads config/field_requirements.generated.json once.
+# Its findings are CANDIDATE-status (mined, not yet benchmarked/promoted) --
+# see field_requirement_engine.py -- so they are surfaced here as evidence
+# *alongside* the keyword-based field policy engine, capped at WARNING, never
+# escalated to a hard BLOCKING gate on their own until someone promotes the
+# rule table to VALIDATED/ACTIVE.
+_FIELD_REQUIREMENT_ENGINE = FieldRequirementEngine()
 
 
 def _text(value: object) -> str:
@@ -193,6 +202,41 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
         ))
         score -= STRICTNESS_PENALTIES[strictness]["warning"]
 
+    # Data-driven layer: what this org's own historical Normal CRs (by Category/Sub
+    # Category) actually required, mined from real fill/disposition rates rather
+    # than assumed from keywords (see field_requirement_engine.py). CANDIDATE-status
+    # -- surfaced as evidence, capped at WARNING, never a hard gate on its own, and
+    # skipped for a field already flagged by the keyword-policy checks above so CAB
+    # doesn't see the same gap reported twice.
+    already_flagged_fields = {
+        code.removeprefix("MISSING_").replace("_", " ") for code in (f.code for f in findings) if code.startswith("MISSING_")
+    } | {"Customer Approval"}  # CUSTOMER_APPROVAL_GAP/PRESENT above already covers this field
+    fr_report = _FIELD_REQUIREMENT_ENGINE.evaluate(cr)
+    for item in fr_report.findings:
+        if item.satisfied or item.requirement_level not in (RequirementLevel.REQUIRED, RequirementLevel.CONDITIONAL):
+            continue
+        if item.field.upper() in {f.upper() for f in already_flagged_fields}:
+            continue
+        findings.append(Finding(
+            f"HISTORICAL_GAP_{item.field.upper().replace(' ', '_').replace('/', '_')}",
+            f"{item.field} gap vs. historical pattern",
+            FindingSeverity.WARNING,
+            item.rationale,
+            technical_detail=f"{item.evidence} (scope={item.rule_scope}, confidence={item.confidence:.2f})",
+            recommendation=f"Review whether {item.field.lower()} should be populated for this change.",
+        ))
+        score -= STRICTNESS_PENALTIES[strictness]["warning"] * 0.5  # softer weight: unvalidated evidence
+
+    for note in fr_report.note_signals:
+        findings.append(Finding(
+            "HISTORICAL_NOTE_SIGNAL",
+            "Work notes echo language seen before past rejections/cancellations",
+            FindingSeverity.WARNING if note.severity == FindingSeverity.WARNING else FindingSeverity.INFO,
+            f"This CR's own work notes contain the phrase {note.phrase!r}.",
+            technical_detail=note.evidence,
+            recommendation="Confirm this CR is not headed toward the same outcome as similar past CRs.",
+        ))
+
     blocking = [f for f in findings if f.severity == FindingSeverity.BLOCKING]
     warnings = [f for f in findings if f.severity == FindingSeverity.WARNING]
     decision = Decision.NOT_READY if blocking else (Decision.CONDITIONAL if warnings else Decision.PASS)
@@ -219,5 +263,10 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
                 {"field": item.field, "present": item.present, "score": item.score, "reasons": list(item.reasons)}
                 for item in quality
             ],
+            "field_requirement_engine": {
+                "lifecycle_status": _FIELD_REQUIREMENT_ENGINE.lifecycle_status,
+                "version": _FIELD_REQUIREMENT_ENGINE.version,
+                "resolved_scope": fr_report.resolved_scope,
+            },
         },
     )
