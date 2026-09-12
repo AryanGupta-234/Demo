@@ -11,6 +11,7 @@ its applicability is supported by an explicit rule or an existing deterministic 
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -105,6 +106,22 @@ def _has_any(text: str, terms: Iterable[str]) -> bool:
     return any(term in text for term in terms)
 
 
+def _has_word(text: str, terms: Iterable[str]) -> bool:
+    """Whole-word match, not substring.
+
+    Several short/generic terms below (db, table, port, api, ...) were measured
+    against the real 2,013-record historical Normal-CR export as plain substring
+    checks and turned out to be dominated by false positives: e.g. bare "port"
+    matched "reporting"/"support"/"important" 96% of the time it fired, "table"
+    matched "-portable"/"-acceptable"/"-suitable" endings ~34% of the time, "db"
+    matched embedded inside CI/hostnames like "PRDDBSRV01" ~38% of the time.
+    Word-boundary matching is used only for terms measured to have this problem;
+    intentionally substring-style terms (e.g. bare "patch" catching "patching"/
+    "patches") are left as plain _has_any substring checks.
+    """
+    return any(re.search(rf"\b{re.escape(term)}\b", text) for term in terms)
+
+
 def context_flags(cr: dict[str, Any]) -> dict[str, bool]:
     """Derive reusable, explainable context flags from a CR without calling an LLM."""
     text = _blob(cr)
@@ -113,30 +130,30 @@ def context_flags(cr: dict[str, Any]) -> dict[str, bool]:
 
     infrastructure = category in {"infrastructure", "infra"} or _has_any(text, (
         "os patch", "server patch", "security patch", "patching", "reboot", "server restart",
-        "infrastructure", "vm", "storage", "middleware",
-    ))
+        "infrastructure", "storage", "middleware",
+    )) or _has_word(text, ("vm",))
     customer_impact = _has_any(text, (
-        "customer", "payment", "transaction", "atm", "sms", "invoice", "user facing",
+        "customer", "payment", "transaction", "invoice", "user facing",
         "customer-facing", "external user", "branch", "channel",
-    ))
+    )) or _has_word(text, ("atm", "sms"))
     functional = _has_any(text, (
-        "enhancement", "defect", "bug fix", "workflow", "functional", "api", "interface",
+        "enhancement", "defect", "bug fix", "workflow", "functional", "interface",
         "transaction", "payment", "customer", "report",
-    ))
+    )) or _has_word(text, ("api",))
     service_restart = _has_any(text, ("restart", "reboot", "downtime", "maintenance window", "unavailable", "outage"))
     security_change = _has_any(text, (
-        "security", "vulnerability", "patch", "certificate", "credential", "firewall", "iam", "authentication",
-        "authorization", "encryption", "tls", "ssl",
-    ))
+        "security", "vulnerability", "patch", "certificate", "credential", "firewall", "authentication",
+        "authorization", "encryption",
+    )) or _has_word(text, ("iam", "tls", "ssl"))
     sensitive_data = _has_any(text, (
         "pii", "personal data", "customer data", "sensitive data", "card data", "account data", "privacy",
     ))
     database_change = _has_any(text, (
-        "database", "db", "schema", "table", "index", "stored procedure", "migration", "sql",
-    ))
+        "database", "schema", "stored procedure", "migration",
+    )) or _has_word(text, ("db", "table", "index", "sql"))
     network_change = _has_any(text, (
-        "firewall", "network", "route", "routing", "load balancer", "proxy", "dns", "port", "connectivity",
-    ))
+        "firewall", "network", "route", "routing", "load balancer", "proxy", "dns", "connectivity",
+    )) or _has_word(text, ("port",))
     high_impact = _has_any(text, (
         "critical", "high impact", "major", "outage", "production outage", "payment", "transaction",
     )) or _text(cr.get("Risk")) in {"high", "critical", "1 - high", "2 - high"}
