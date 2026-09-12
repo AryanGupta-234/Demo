@@ -55,6 +55,10 @@ class GroqGPTOSS120B:
             from groq import Groq
 
             client = Groq(api_key=self.api_key)
+            try:
+                max_completion_tokens = int(os.getenv("GROQ_MAX_COMPLETION_TOKENS", "4096"))
+            except ValueError:
+                max_completion_tokens = 4096
             kwargs: dict[str, Any] = {
                 "model": os.getenv("GROQ_MODEL", self.model_name),
                 "messages": [
@@ -63,6 +67,7 @@ class GroqGPTOSS120B:
                 ],
                 "temperature": temperature,
                 "reasoning_effort": reasoning_effort,
+                "max_completion_tokens": max_completion_tokens,
             }
             if response_format:
                 kwargs["response_format"] = response_format
