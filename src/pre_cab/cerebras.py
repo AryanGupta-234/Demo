@@ -20,10 +20,13 @@ class CerebrasGPTOSS120B:
     model_name = "gpt-oss-120b"
 
     def __post_init__(self) -> None:
-        self.api_key = self.api_key or os.getenv("CEREBRAS_API_KEY")
-        self.model_id = self.model_id or os.getenv("CEREBRAS_MODEL", self.model_name)
-        self.base_url = (self.base_url or os.getenv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1")).rstrip("/")
-        self.model_name = self.model_id
+        api_key = self.api_key or os.getenv("CEREBRAS_API_KEY")
+        model_id: str = str(self.model_id or os.getenv("CEREBRAS_MODEL", self.model_name))
+        base_url: str = str(self.base_url or os.getenv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"))
+        self.api_key = api_key
+        self.model_id = model_id
+        self.base_url = base_url.rstrip("/")
+        self.model_name = model_id
         if not self.api_key:
             raise RuntimeError("CEREBRAS_API_KEY is required for the Cerebras GPT-OSS 120B provider.")
 

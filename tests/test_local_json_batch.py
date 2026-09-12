@@ -64,9 +64,10 @@ def test_record_type_normalizes_service_now_variants() -> None:
 def test_main_runs_without_model_credentials(monkeypatch, tmp_path) -> None:
     source = tmp_path / "single.json"
     source.write_text(json.dumps({"result": [_cr("CHG-1000")]}), encoding="utf-8")
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setattr(sys, "argv", ["main.py", str(source)])
-    monkeypatch.setattr(main, "build_provider", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("provider should not be used without credentials")))
+    monkeypatch.setattr(main, "build_runtime_provider", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("provider should not be used without credentials")))
 
     assert main.main() == 0
