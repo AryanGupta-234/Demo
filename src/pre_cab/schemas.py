@@ -68,3 +68,6 @@ class AgentContext:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     strictness: Strictness = Strictness.BALANCED
     prior_findings: tuple[Finding, ...] = ()
+    # Compact field-selected representation for generative reasoning. Deterministic
+    # agents continue to receive the complete normalized CR through `cr`.
+    llm_cr: dict[str, Any] | None = None
