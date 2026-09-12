@@ -13,7 +13,6 @@ def test_infrastructure_patch_does_not_force_uat():
     }
     results = {r.name: r for r in infer_requirements(cr)}
     assert results["UAT"].required is False
-    assert results["Rollback / recovery"].required is True
 
 
 def test_customer_facing_change_predicts_customer_approval():

@@ -73,7 +73,14 @@ FIELD_POLICIES: tuple[FieldPolicy, ...] = (
     # export actually calls these fields once aliased -- see input_loader.normalize_cr_record.
     FieldPolicy("Planned start", "Planned start", "schedule", required_when=("production-change-window",)),
     FieldPolicy("Planned end", "Planned end", "schedule", required_when=("production-change-window",)),
-    FieldPolicy("Affected Customers", "Affected customers", "business", required_when=("customer-impact",)),
+    # "Affected Customers" was removed as a hard FieldPolicy: measured against the
+    # real 2,013-record historical export, this field is populated in only 28
+    # records (1.4%) org-wide -- not just when customer-impact fires, essentially
+    # never. The customer-impact context flag itself fires on 58.8% of real CRs,
+    # so keeping this as a required field meant a WARNING that was satisfied
+    # almost never, on well over half of every report -- noise, not signal. The
+    # underlying concern is still carried by the "Customer Approval" field policy
+    # and contextual signal below, which the real data shows the org actually uses.
     # "Service impact", "Downtime", "Security review", "Privacy review", "Database
     # validation", "Network approval", "Monitoring plan" were deliberately removed from
     # this list. They do not exist as fields anywhere in this org's real ServiceNow
@@ -246,44 +253,46 @@ def contextual_signals(cr: dict[str, Any]) -> list[ApplicabilitySignal]:
         ),
         ApplicabilitySignal(
             "Outage / impact detail", flags["impact-detail"], 0.88 if flags["impact-detail"] else 0.80,
-            "Production changes with restart, downtime, or material impact should state expected service impact and timing.",
-            "contextual-rules-v2", required_fields=("Service impact", "Downtime"), severity="WARNING",
+            "Production changes with restart, downtime, or material impact should state expected service impact "
+            "and timing; this org has no dedicated field for it, so assess from the Description/Justification narrative.",
+            "contextual-rules-v2", required_fields=("Description", "Justification"), severity="WARNING",
         ),
         ApplicabilitySignal(
             "Security review", flags["security-change"], 0.90 if flags["security-change"] else 0.80,
-            "Security-relevant changes should surface the applicable security review/evidence path.",
-            "contextual-rules-v2", required_fields=("Security review",), evidence_fields=("Security review",), severity="WARNING",
+            "Security-relevant changes should have their review path documented; this org has no dedicated field "
+            "for it, so assess from the Description/Justification/Risk and impact analysis narrative.",
+            "contextual-rules-v2", required_fields=("Description", "Risk and impact analysis"), severity="WARNING",
         ),
         ApplicabilitySignal(
             "Privacy / data review", flags["sensitive-data"], 0.90 if flags["sensitive-data"] else 0.80,
-            "Sensitive or personal data signals require the applicable privacy/data-control review.",
-            "contextual-rules-v2", required_fields=("Privacy review",), evidence_fields=("Privacy review",), severity="WARNING",
+            "Sensitive or personal data signals require the applicable privacy/data-control review to be "
+            "documented; this org has no dedicated field for it, so assess from the Description/Justification narrative.",
+            "contextual-rules-v2", required_fields=("Description", "Justification"), severity="WARNING",
         ),
         ApplicabilitySignal(
             "Database validation", flags["database-change"], 0.91 if flags["database-change"] else 0.80,
-            "Database/schema changes need explicit validation and recovery consideration.",
-            "contextual-rules-v2", required_fields=("Database validation",), evidence_fields=("Database validation",), severity="WARNING",
+            "Database/schema changes need explicit validation and recovery consideration; this org has no dedicated "
+            "field for it, so assess from the Implementation plan/Backout plan narrative.",
+            "contextual-rules-v2", required_fields=("Implementation plan", "Backout plan"), severity="WARNING",
         ),
         ApplicabilitySignal(
             "Network approval", flags["network-change"], 0.90 if flags["network-change"] else 0.80,
-            "Network/firewall/connectivity changes should surface the applicable network approval path.",
-            "contextual-rules-v2", required_fields=("Network approval",), evidence_fields=("Network approval",), severity="WARNING",
+            "Network/firewall/connectivity changes should have their approval path documented; this org has no "
+            "dedicated field for it, so assess from the Implementation plan/Backout plan narrative.",
+            "contextual-rules-v2", required_fields=("Implementation plan", "Backout plan"), severity="WARNING",
         ),
         ApplicabilitySignal(
             "Monitoring", flags["high-impact"], 0.86 if flags["high-impact"] else 0.78,
-            "Higher-impact changes benefit from explicit post-change monitoring/validation.",
-            "contextual-rules-v2", required_fields=("Monitoring plan",), severity="WARNING",
+            "Higher-impact changes benefit from explicit post-change monitoring/validation; this org has no "
+            "dedicated field for it, so assess from the Implementation plan/Test plan narrative.",
+            "contextual-rules-v2", required_fields=("Implementation plan", "Test plan"), severity="WARNING",
         ),
-        ApplicabilitySignal(
-            "Rollback / recovery", True, 0.99,
-            "A Normal production change should have a credible recovery path unless an approved exception is documented.",
-            "baseline-rule-v2", required_fields=("Backout plan",), evidence_fields=("Backout plan",), severity="BLOCKING",
-        ),
-        ApplicabilitySignal(
-            "Conflict check", True, 0.99,
-            "A current conflict state should be known before readiness is asserted.",
-            "baseline-rule-v2", required_fields=("Conflict status",), severity="BLOCKING",
-        ),
+        # "Rollback / recovery" and "Conflict check" were removed: both were
+        # unconditional (applicable=True, confidence=0.99) duplicates of the
+        # "Backout plan" and "Conflict status" FieldPolicy entries above, which
+        # already generate their own real findings (BACKOUT_OK/BACKOUT_WEAK,
+        # CONFLICT) against the actual field. Keeping both meant every report
+        # listed the same requirement twice under two different names.
     ]
 
 
