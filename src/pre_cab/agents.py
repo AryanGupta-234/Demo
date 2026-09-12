@@ -29,15 +29,137 @@ class BaseAgent:
 
 
 class FieldAgent(BaseAgent):
+    """Select the minimum decision-relevant CR fields for generative reasoning.
+
+    The complete normalized CR remains available to deterministic validation. This
+    agent is specifically a context compressor: it uses the mined field-policy
+    table plus known descriptive/signoff semantics to decide what GPT-OSS needs
+    to see. Fields classified NOT_OBSERVED by the historical rule table are
+    excluded as noise (for example, this org's unused ``Change plan`` field).
+    """
+
     name = "field"
 
+    _DESCRIPTIVE_FIELDS = (
+        "Short description",
+        "Description",
+        "Justification",
+        "Implementation plan",
+        "Change plan",
+        "Backout plan",
+        "Test plan",
+        "Configuration item",
+        "Risk",
+        "Priority",
+    )
+    _SIGNOFF_FIELDS = (
+        "UAT signoff",
+        "Customer Approval",
+        "TCS QA signoff",
+        "Test Results Evidence",
+        "Lower Environment Reference CR/SR",
+    )
+    _CONTEXT_FIELDS = (
+        "Number",
+        "Type",
+        "Category",
+        "Sub Category",
+        "Environment",
+        "Planned start",
+        "Planned end",
+        "Conflict status",
+        "Change Class",
+    )
+    _EMPTY = {None, "", [], {}}  # only used through _present below
+
+    @staticmethod
+    def _present(value: Any) -> bool:
+        if value is None or value == "" or value == [] or value == {}:
+            return False
+        return str(value).strip().lower() not in {"none", "null", "nan"}
+
+    @staticmethod
+    def _policy_levels(cr: dict[str, Any]) -> dict[str, str]:
+        from .field_requirement_engine import FieldRequirementEngine
+
+        report = FieldRequirementEngine().evaluate(cr)
+        return {finding.field: finding.requirement_level.value for finding in report.findings}
+
     def run(self, context: AgentContext) -> AgentResult:
-        populated = sum(value not in (None, "", [], {}) for value in context.cr.values())
+        cr = context.cr
+        levels = self._policy_levels(cr)
+
+        selected: list[str] = []
+        reasons: dict[str, str] = {}
+
+        # Always retain the high-information descriptive core when present.
+        for field_name in self._DESCRIPTIVE_FIELDS:
+            if not self._present(cr.get(field_name)):
+                continue
+            level = levels.get(field_name)
+            if level == "NOT_OBSERVED":
+                continue
+            selected.append(field_name)
+            reasons[field_name] = "descriptive-field"
+
+        # Signoffs are disposition fields: include them when populated, or when
+        # the mined policy/context says they are genuinely required/conditional.
+        for field_name in self._SIGNOFF_FIELDS:
+            level = levels.get(field_name)
+            include = self._present(cr.get(field_name)) or level in {"REQUIRED", "CONDITIONAL"}
+            if include and level != "NOT_OBSERVED":
+                selected.append(field_name)
+                reasons[field_name] = "signoff-disposition"
+
+        # Compact context needed to interpret the selected business/technical text.
+        for field_name in self._CONTEXT_FIELDS:
+            level = levels.get(field_name)
+            include = self._present(cr.get(field_name)) or level in {"REQUIRED", "CONDITIONAL"}
+            if include and level != "NOT_OBSERVED":
+                selected.append(field_name)
+                reasons[field_name] = "decision-context"
+
+        # Preserve order while avoiding duplicates.
+        selected = list(dict.fromkeys(selected))
+        compact = {field_name: cr.get(field_name) for field_name in selected}
+
+        omitted_populated = [
+            field_name
+            for field_name, value in cr.items()
+            if self._present(value) and field_name not in compact
+        ]
+        not_observed_omitted = [
+            field_name for field_name in self._DESCRIPTIVE_FIELDS
+            if levels.get(field_name) == "NOT_OBSERVED"
+        ]
+
+        chain = [
+            f"reviewed {len(cr)} normalized fields",
+            f"selected {len(selected)} decision-relevant fields for GPT-OSS",
+            f"kept descriptive core: {', '.join(f for f in self._DESCRIPTIVE_FIELDS if f in compact) or 'none'}",
+            f"included applicable signoff dispositions: {', '.join(f for f in self._SIGNOFF_FIELDS if f in compact) or 'none'}",
+        ]
+        if not_observed_omitted:
+            chain.append(f"excluded NOT_OBSERVED fields: {', '.join(not_observed_omitted)}")
+        chain.append(f"omitted {len(omitted_populated)} populated non-decision fields from model context")
+
         return AgentResult(
             self.name,
             [],
             [],
-            {"field_count": len(context.cr), "populated_fields": populated, "validator_owned_by_orchestrator": True},
+            {
+                "field_count": len(cr),
+                "populated_fields": sum(self._present(v) for v in cr.values()),
+                "selected_field_count": len(selected),
+                "selected_fields": selected,
+                "selected_cr": compact,
+                "selection_reason": reasons,
+                "omitted_populated_fields_count": len(omitted_populated),
+                "not_observed_omitted": not_observed_omitted,
+                "validator_owned_by_orchestrator": True,
+                "llm_context_role": "field-selected decision context",
+                "chain": chain,
+            },
         )
 
 
@@ -251,9 +373,6 @@ class RiskAgent(BaseAgent):
         declared_low = risk.lower() in {"low", "none", "minimal", "minimal risk"}
         contradiction = declared_low and elevated_impact
 
-        # Simple, explainable confidence: penalize a missing declared risk and a
-        # detected risk/impact contradiction; otherwise a populated impact
-        # narrative earns more confidence than a bare risk label alone.
         confidence = 0.5
         if risk:
             confidence += 0.2
