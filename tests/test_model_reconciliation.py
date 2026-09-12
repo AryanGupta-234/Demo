@@ -58,7 +58,7 @@ def test_model_can_downgrade_deterministic_pass() -> None:
 
 def test_model_cannot_upgrade_deterministic_blocker() -> None:
     cr = _good_cr()
-    cr["Conflict status"] = "Conflict"
+    cr["Implementation plan"] = ""  # genuinely BLOCKING under BALANCED (baseline field)
     result = run_stage1(cr, strictness=Strictness.BALANCED, model=StaticProvider("PASS"))
     assert result.stage1.decision == Decision.NOT_READY
     assert result.stage1.metadata["deterministic_prediction"] == "NOT_READY"

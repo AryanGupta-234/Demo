@@ -35,19 +35,30 @@ def infer_uat_requirement(cr: dict) -> tuple[bool, str]:
     return (prediction.required, prediction.reason) if prediction else (False, "No UAT requirement prediction was produced.")
 
 
-def rollback_quality(backout_plan: object) -> tuple[bool, str]:
+def rollback_quality(backout_plan: object) -> tuple[bool, str, bool]:
+    """Return (credible, reason, is_explicit_disposition).
+
+    is_explicit_disposition distinguishes "nothing was ever written" (true gap,
+    always a concern) from "the requester explicitly wrote NA/None" (a real
+    disposition that may or may not be justified -- per the real 2,013-record
+    historical export, ~36% of Normal CRs (722) have no recovery mechanism
+    description and yet a large majority of those were still approved
+    historically, so an explicit NA is treated as a review prompt rather than
+    an automatic hard stop; see decision.py's caller for the severity mapping).
+    """
     text = _text(backout_plan).lower()
     if not text:
-        return False, "No backout/recovery mechanism is described."
+        return False, "No backout/recovery mechanism is described.", False
     if text in {"na", "n/a", "none", "not applicable"}:
-        return False, "Backout is marked not applicable without supporting rationale."
+        return False, "Backout is explicitly marked not applicable without supporting rationale.", True
     recovery_terms = (
-        "backup", "restore", "rollback", "revert", "previous version", "snapshot",
-        "restore services", "replace", "recover", "back up", "can be reverted", "can be reversed",
+        "backup", "back up", "restore", "rollback", "roll back", "roll-back", "revert", "reverting",
+        "previous version", "snapshot", "restore services", "replace", "recover", "can be reverted",
+        "can be reversed", "uninstall", "redeploy", "re-deploy", "de-install",
     )
     if any(term in text for term in recovery_terms):
-        return True, "A credible recovery mechanism is described; procedural detail can affect confidence."
-    return False, "No clear recovery mechanism was identified in the backout plan."
+        return True, "A credible recovery mechanism is described; procedural detail can affect confidence.", False
+    return False, "No clear recovery mechanism was identified in the backout plan.", False
 
 
 def _find_requirement(requirements: list[Requirement], name: str) -> Requirement | None:
@@ -111,16 +122,26 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
             score -= STRICTNESS_PENALTIES[strictness]["warning"]
 
     # Preserve the dedicated recovery semantic check: presence is not enough.
-    rollback_ok, rollback_reason = rollback_quality(cr.get("Backout plan"))
+    rollback_ok, rollback_reason, explicit_na = rollback_quality(cr.get("Backout plan"))
+    if rollback_ok:
+        rollback_severity = FindingSeverity.INFO
+    elif explicit_na:
+        # Measured: 722/2013 real historical Normal CRs (36%) have an explicit NA
+        # backout plan and no clear recovery mechanism, yet most were still
+        # historically approved -- treat as a review prompt, not an automatic
+        # stop, except under STRICT's deliberately conservative handling.
+        rollback_severity = FindingSeverity.BLOCKING if strictness == Strictness.STRICT else FindingSeverity.WARNING
+    else:
+        rollback_severity = FindingSeverity.BLOCKING  # nothing was ever written at all - always a real gap
     findings.append(Finding(
         "BACKOUT_OK" if rollback_ok else "BACKOUT_WEAK",
         "Recovery path identified" if rollback_ok else "Recovery path needs attention",
-        FindingSeverity.INFO if rollback_ok else FindingSeverity.BLOCKING,
+        rollback_severity,
         "The CR contains a plausible recovery mechanism." if rollback_ok else "The backout plan does not yet provide a clear recovery mechanism.",
         technical_detail=rollback_reason,
         recommendation="Add or justify a usable rollback/recovery path." if not rollback_ok else "",
     ))
-    if not rollback_ok:
+    if not rollback_ok and rollback_severity != FindingSeverity.BLOCKING:
         score -= STRICTNESS_PENALTIES[strictness]["warning"]
 
     # Contextual requirements remain visible even when their field is not populated.
@@ -166,12 +187,25 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
 
     conflict = _text(cr.get("Conflict status")).lower()
     if conflict in {"conflict", "conflicted"}:
+        # NOTE: measured against the real 2,013-record historical Normal-CR export:
+        # CRs flagged "Conflict" by ServiceNow's automated conflict detector were
+        # still approved 77.4% of the time (724/936), barely below the 83.0%
+        # baseline approval rate for "No Conflict" CRs (894/1077). This org
+        # evidently treats an automated conflict flag as routine/reviewable, not
+        # an automatic stop -- so it is WARNING under LENIENT/BALANCED (feeds
+        # CONDITIONAL) and only escalates to a hard BLOCKING gate under STRICT,
+        # where unresolved ambiguity is deliberately treated more conservatively.
+        conflict_severity = FindingSeverity.BLOCKING if strictness == Strictness.STRICT else FindingSeverity.WARNING
         findings.append(Finding(
-            "CONFLICT", "Blocking change conflict", FindingSeverity.BLOCKING,
-            "ServiceNow reports a conflict for this change.",
+            "CONFLICT", "Change conflict flagged", conflict_severity,
+            "ServiceNow reports a conflict for this change; historically most flagged "
+            "changes in this org are still approved after review, so this is a review "
+            "prompt rather than an automatic stop (escalates to blocking under STRICT).",
             technical_detail=f"Conflict status={conflict!r}",
             recommendation="Resolve or explicitly disposition the conflict before approval.",
         ))
+        if conflict_severity == FindingSeverity.WARNING:
+            score -= STRICTNESS_PENALTIES[strictness]["warning"]
     elif conflict in {"not run", "not checked", "unknown", ""}:
         findings.append(Finding(
             "CONFLICT_UNVERIFIED", "Conflict status is not fully verified", FindingSeverity.WARNING,
