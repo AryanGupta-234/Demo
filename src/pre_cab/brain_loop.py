@@ -1,8 +1,4 @@
-"""Adaptive GPT-OSS 120B reasoning loop.
-
-Free mode uses one structured synthesis call containing self-critique. Paid/benchmark mode can use a
-second independent adversarial pass for higher scrutiny.
-"""
+"""Adaptive GPT-OSS 120B reasoning loop using robust JSON-object output."""
 from __future__ import annotations
 
 import json
@@ -11,13 +7,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from .brain import build_reasoning_payload, build_reasoning_system_prompt, self_critique_questions
-from .brain_schema import BRAIN_RESPONSE_SCHEMA
 from .context_compaction import compact_cr, compact_evidence, compact_findings, compact_memory
 from .memory import MemoryKind, UnifiedMemory
 from .models import ModelProvider, ModelResponse
 from .retrieval import build_cr_query
 from .sanitization import sanitize_cr_for_reasoning, sanitize_value
 from .schemas import AgentContext, Finding
+
+_JSON_OBJECT_FORMAT = {"type": "json_object"}
 
 
 @dataclass(frozen=True)
@@ -62,7 +59,7 @@ class AgenticReasoningLoop:
             limit=self.limit,
         )
 
-    def run(self, context: AgentContext, findings: list[Finding] | None = None) -> ReasoningLoopResult:
+    def _build_payload(self, context: AgentContext, findings: list[Finding] | None) -> dict[str, Any]:
         clean_cr = compact_cr(sanitize_cr_for_reasoning(context.cr))
         memories = self._memories(clean_cr)
         payload = build_reasoning_payload(clean_cr, memories=memories, prior_findings=findings or [])
@@ -73,18 +70,37 @@ class AgenticReasoningLoop:
         payload["strictness"] = context.strictness.value
         payload["evidence"] = compact_evidence(sanitize_value(list(context.evidence or ())), limit=10)
         payload["self_critique_questions"] = list(self_critique_questions())
+        payload["output_contract"] = {
+            "prediction": "PASS, CONDITIONAL, or NOT_READY",
+            "confidence": "number from 0 to 1",
+            "facts": "array of concise factual observations only",
+            "inferences": "array of reasoned conclusions grounded in facts",
+            "uncertainties": "array of unresolved items",
+            "contradictions": "array of detected inconsistencies",
+            "technical_reasoning": "substantive technical assessment",
+            "cab_reasoning": "plain-language CAB decision rationale",
+            "cab_questions": "array of useful CAB questions",
+            "recommendations": "array of concrete next actions",
+            "self_critique": "array describing how the conclusion was challenged",
+        }
         payload["instruction"] = (
-            "Produce the final structured assessment using CR fields, retrieved history/policy, and "
-            "attachment evidence. Challenge your own assumptions inside self_critique before choosing "
-            "the prediction. Never invent missing evidence. Evidence contradictions override unsupported "
-            "CR claims."
+            "Return ONLY one valid JSON object. Do not use markdown. Include every key named in "
+            "output_contract. Analyze the actual CR and the specialist findings; do not merely restate "
+            "field presence. Explain why the change is or is not ready. Use historical memory and clone "
+            "information when available. UAT is contextual, not universal. A rollback is acceptable only "
+            "when it represents a credible recovery mechanism. Never invent approvals, testing, evidence, "
+            "history, or policy. Distinguish facts, inferences, and uncertainties. Challenge the conclusion "
+            "for false-PASS risk before finalizing."
         )
+        return payload
 
+    def run(self, context: AgentContext, findings: list[Finding] | None = None) -> ReasoningLoopResult:
+        payload = self._build_payload(context, findings)
         initial = self.model.generate(
             system=build_reasoning_system_prompt(),
             user=json.dumps(payload, ensure_ascii=False, default=str),
             temperature=0.05,
-            response_format=BRAIN_RESPONSE_SCHEMA,
+            response_format=_JSON_OBJECT_FORMAT,
             reasoning_effort="high",
         )
 
@@ -99,20 +115,23 @@ class AgenticReasoningLoop:
                     "never_invent_evidence": True,
                     "look_for_contradictions": True,
                     "look_for_false_pass_risk": True,
+                    "return_only_valid_json": True,
                 },
             }
             critique = self.model.generate(
                 system=(
                     build_reasoning_system_prompt()
-                    + " You are an independent adversarial reviewer. Return the same JSON schema, but "
-                    "revise the prediction when unsupported assumptions or false-pass risk warrant it."
+                    + " You are an independent adversarial reviewer. Return one valid JSON object "
+                    "using the same output contract and revise the prediction when warranted."
                 ),
                 user=json.dumps(critique_payload, ensure_ascii=False, default=str),
                 temperature=0.0,
-                response_format=BRAIN_RESPONSE_SCHEMA,
+                response_format=_JSON_OBJECT_FORMAT,
                 reasoning_effort="high",
             )
 
+        clean_cr = compact_cr(sanitize_cr_for_reasoning(context.cr))
+        memories = self._memories(clean_cr)
         memory_view = tuple(
             {
                 "id": m.memory_id,
