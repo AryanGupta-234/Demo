@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .agents import DEFAULT_AGENT_TYPES, AgentResult
@@ -90,12 +90,21 @@ def run_stage1(
     warnings = [f for f in merged if f.severity == FindingSeverity.WARNING]
     deterministic_decision = Decision.NOT_READY if blocking else (Decision.CONDITIONAL if warnings else Decision.PASS)
 
+    # Field Agent owns model-context selection. All other agents continue to see
+    # the complete normalized CR, while GPT-OSS receives only decision-relevant
+    # fields plus the specialist findings below.
+    field_notes = next((r.notes for r in results if r.agent == "field"), {})
+    selected_cr = field_notes.get("selected_cr") if isinstance(field_notes, dict) else None
+    if not isinstance(selected_cr, dict) or not selected_cr:
+        selected_cr = cr
+    model_context = replace(context, llm_cr=selected_cr)
+
     reasoning: ReasoningLoopResult | None = None
     model_error: str | None = None
     if model is not None:
         try:
             brain = AgenticReasoningLoop(model=model, memory=memory)
-            reasoning = brain.run(context, findings=merged)
+            reasoning = brain.run(model_context, findings=merged)
         except Exception as exc:
             model_error = f"{type(exc).__name__}: {exc}"
 
@@ -175,6 +184,10 @@ def run_stage1(
             "deterministic_prediction": deterministic_decision.value,
             "memory_records_retrieved": len(reasoning.retrieved_memory) if reasoning else 0,
             "brain": brain_payload or {},
+            "llm_selected_fields": field_notes.get("selected_fields", []) if isinstance(field_notes, dict) else [],
+            "llm_selected_field_count": field_notes.get("selected_field_count", 0) if isinstance(field_notes, dict) else 0,
+            "llm_omitted_populated_fields_count": field_notes.get("omitted_populated_fields_count", 0) if isinstance(field_notes, dict) else 0,
+            "llm_not_observed_omitted": field_notes.get("not_observed_omitted", []) if isinstance(field_notes, dict) else [],
         }
     )
     return PipelineResult(
