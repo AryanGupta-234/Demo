@@ -9,23 +9,13 @@ from typing import Any
 
 from pre_cab.audit_store import SQLiteAuditStore
 from pre_cab.env_loader import load_dotenv
-from pre_cab.input_loader import load_cr_records, source_id
+from pre_cab.input_loader import load_cr_records, normalize_cr_record, source_id
+from pre_cab.narrative import format_agent_chains, format_cab_result
 from pre_cab.pipeline import run_pre_cab
 from pre_cab.persistent_memory import SQLiteUnifiedMemory
 from pre_cab.reporting import build_report
 from pre_cab.runtime_provider import build_runtime_provider
 from pre_cab.schemas import Strictness
-
-
-def _print_value(label: str, value: Any) -> None:
-    if value in (None, "", [], {}):
-        return
-    print(f"\n{label}:")
-    if isinstance(value, list):
-        for item in value:
-            print(f"• {item}")
-    else:
-        print(str(value))
 
 
 def main() -> int:
@@ -41,15 +31,27 @@ def main() -> int:
     records = load_cr_records(args.cr_json)
     if not records:
         raise SystemExit("Input JSON contains no CR records")
-    if not any(os.getenv(name) for name in ("CEREBRAS_API_KEY", "GROQ_API_KEY", "HF_TOKEN")):
-        raise SystemExit("GPT-OSS 120B credentials not detected after loading .env. Set a provider key in .env or the shell.")
 
-    try:
-        model = build_runtime_provider(args.provider)
-    except Exception as exc:
-        raise SystemExit(f"Could not initialize GPT-OSS 120B provider: {type(exc).__name__}: {exc}") from exc
-
-    print(f"LLM provider/model: {getattr(model, 'model_name', type(model).__name__)}")
+    # One-command operation must work with zero setup: GPT-OSS is an optional
+    # reasoning layer on top of the deterministic engine, never a prerequisite
+    # for it (see run_pre_cab/run_stage1: deterministic safety reconciliation is
+    # the final authority regardless of whether a model ran at all). A missing
+    # or failing provider degrades to deterministic-only validation rather than
+    # blocking the tool outright -- unless the user explicitly named a provider
+    # with --provider, in which case failing to honor that explicit choice
+    # silently would be more confusing than just saying so.
+    model = None
+    have_credentials = any(os.getenv(name) for name in ("CEREBRAS_API_KEY", "GROQ_API_KEY", "HF_TOKEN"))
+    if args.provider or have_credentials:
+        try:
+            model = build_runtime_provider(args.provider)
+            print(f"LLM provider/model: {getattr(model, 'model_name', type(model).__name__)}")
+        except Exception as exc:
+            if args.provider:
+                raise SystemExit(f"Could not initialize GPT-OSS 120B provider: {type(exc).__name__}: {exc}") from exc
+            print(f"LLM unavailable: {type(exc).__name__}: {exc}; continuing with deterministic evaluation only.")
+    else:
+        print("No GPT-OSS credentials detected; continuing with deterministic validation only.")
     memory = SQLiteUnifiedMemory(Path(".pre_cab") / "memory.sqlite3")
     audit = SQLiteAuditStore(Path(".pre_cab") / "audit.sqlite3")
     reports: list[dict[str, Any]] = []
@@ -61,6 +63,12 @@ def main() -> int:
             result = run_pre_cab(cr, strictness=Strictness(args.strictness), model=model, memory=memory, attachment_root=args.attachment_root)
             report = build_report(result.stage1, stage2=result.stage2)
             report.update({"cr_number": number, "final_decision": result.final_decision.value, "documents_analyzed": len(result.documents), "final_reasoning": result.stage1.metadata.get("brain", {}), "llm_model": getattr(model, "model_name", None)})
+            canonical_cr = normalize_cr_record(cr)
+            report["agent_chains_text"] = format_agent_chains(result.agent_results)
+            report["cab_block_text"] = format_cab_result(
+                number, canonical_cr, result.final_decision, result.stage1.confidence,
+                result.agent_results, result.stage1.findings, result.stage1.metadata.get("brain") or {},
+            )
             run_id = audit.record(cr_number=number, strictness=args.strictness, stage1_decision=result.stage1.decision.value, stage2_decision=result.stage2.decision.value if result.stage2 else None, final_decision=result.final_decision.value, model=getattr(model, "model_name", None), payload=report)
             report["run_id"] = run_id
             args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -73,21 +81,14 @@ def main() -> int:
 
     if len(reports) == 1:
         report = reports[0]
-        print("\nPRE-CAB RESULT")
-        print("=" * 80)
-        print(f"CR: {report.get('cr_number')}")
-        print(f"Prediction: {report.get('final_decision')}")
-        print(f"Confidence: {float(report.get('confidence', 0)):.0%}")
-        cab = report.get("cab_view", {})
-        _print_value("CAB SUMMARY", cab.get("summary"))
-        _print_value("CAB ATTENTION", cab.get("attention_items"))
-        technical = report.get("technical_view", {})
-        _print_value("TECHNICAL SUMMARY", technical.get("summary"))
-        _print_value("HISTORICAL / CLONE MATCHES", technical.get("historical_matches"))
-        brain = report.get("final_reasoning", {})
-        for heading, key in (("FACTS", "facts"), ("INFERENCES", "inferences"), ("UNCERTAINTIES", "uncertainties"), ("CONTRADICTIONS", "contradictions"), ("AI TECHNICAL REASONING", "technical_reasoning"), ("AI CAB REASONING", "cab_reasoning"), ("CAB QUESTIONS", "cab_questions"), ("RECOMMENDATIONS", "recommendations"), ("SELF-CRITIQUE", "self_critique")):
-            _print_value(heading, brain.get(key))
-        print("=" * 80)
+        agent_chains = report.get("agent_chains_text")
+        if agent_chains:
+            print(f"\n{agent_chains}\n")
+        cab_block = report.get("cab_block_text")
+        if cab_block:
+            print(cab_block)
+        else:
+            print(f"\nCR {report.get('cr_number')}: {report.get('final_decision')} (see error above)")
     else:
         counts = {"PASS": 0, "CONDITIONAL": 0, "NOT_READY": 0, "ERROR": 0}
         for report in reports:

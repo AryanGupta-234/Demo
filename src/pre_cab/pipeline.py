@@ -1,7 +1,7 @@
 """Stable public entrypoint for the two-stage Pre-CAB pipeline."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,7 @@ class FinalPipelineResult:
     final_decision: Decision
     documents: list[EvidenceDocument]
     final_reasoning: FinalReasoningResult | None = None
+    agent_results: list[Any] = field(default_factory=list)
 
 
 def _merge_decisions(stage1: Decision, stage2: Decision | None) -> Decision:
@@ -135,4 +136,5 @@ def run_pre_cab(
         final_decision=final_decision,
         documents=deduped,
         final_reasoning=reasoning,
+        agent_results=stage1_result.agent_results,
     )

@@ -80,9 +80,40 @@ class TechnicalAgent(BaseAgent):
     name = "technical"
 
     def run(self, context: AgentContext) -> AgentResult:
-        implementation = str(context.cr.get("Implementation plan") or "").strip()
-        backout = str(context.cr.get("Backout plan") or "").strip()
-        ci = str(context.cr.get("Configuration item") or "").strip()
+        from .decision import rollback_quality
+
+        cr = context.cr
+        implementation = str(cr.get("Implementation plan") or "").strip()
+        backout = str(cr.get("Backout plan") or "").strip()
+        ci = str(cr.get("Configuration item") or "").strip()
+        evidence = str(cr.get("Test Results Evidence") or "").strip()
+        lower_env_ref = str(cr.get("Lower Environment Reference CR/SR") or "").strip()
+
+        implementation_present = bool(implementation)
+        ci_present = bool(ci)
+        rollback_ok, rollback_reason, _explicit_na = rollback_quality(backout)
+        rollback_aligned = rollback_ok and implementation_present
+        dependency_evidence_present = bool(evidence) and evidence.lower() not in {"na", "n/a", "none"} or (
+            bool(lower_env_ref) and lower_env_ref.lower() not in {"na", "n/a", "none", "not applicable"}
+        )
+
+        present_signals = sum([implementation_present, ci_present, rollback_ok, dependency_evidence_present])
+        uncertainty = "low" if present_signals >= 4 else ("medium" if present_signals >= 2 else "high")
+
+        chain = [
+            "implementation is present" if implementation_present else "implementation is not described",
+            "configuration item identified" if ci_present else "no configuration item identified",
+            (
+                "rollback mechanism aligns with implementation" if rollback_aligned
+                else "rollback mechanism could not be correlated with implementation"
+            ),
+            (
+                "dependency/lower-environment validation evidence present" if dependency_evidence_present
+                else "no evidence of dependency validation"
+            ),
+            f"{uncertainty} technical uncertainty",
+        ]
+
         finding = Finding(
             code="TECH_SCOPE",
             title="Technical scope extracted",
@@ -94,7 +125,15 @@ class TechnicalAgent(BaseAgent):
             self.name,
             [finding],
             [],
-            {"implementation_length": len(implementation), "backout_length": len(backout), "ci": ci},
+            {
+                "implementation_length": len(implementation),
+                "backout_length": len(backout),
+                "ci": ci,
+                "chain": chain,
+                "technical_uncertainty": uncertainty,
+                "rollback_aligned": rollback_aligned,
+                "rollback_reason": rollback_reason,
+            },
         )
 
 
@@ -141,10 +180,11 @@ class TestingAgent(BaseAgent):
 
     def run(self, context: AgentContext) -> AgentResult:
         from .requirements import infer_requirements
-        predictions = infer_requirements(context.cr)
+        cr = context.cr
+        predictions = infer_requirements(cr)
         uat = next((prediction for prediction in predictions if prediction.name == "UAT"), None)
-        test_plan = str(context.cr.get("Test plan") or "").strip()
-        evidence = str(context.cr.get("Test Results Evidence") or "").strip()
+        test_plan = str(cr.get("Test plan") or "").strip()
+        evidence = str(cr.get("Test Results Evidence") or "").strip()
         findings: list[Finding] = []
         if not test_plan:
             findings.append(Finding(
@@ -154,6 +194,26 @@ class TestingAgent(BaseAgent):
                 message="No testing plan is populated in the CR.",
                 recommendation="Provide an applicable test approach or documented rationale.",
             ))
+
+        narrative_text = " ".join(
+            str(cr.get(field) or "") for field in ("Test plan", "Description", "Lower Environment Reference CR/SR")
+        ).lower()
+        pre_prod_claimed = any(
+            term in narrative_text for term in ("pre-prod", "pre prod", "uat", "staging", "sit environment", "test environment")
+        )
+        evidence_present = bool(evidence) and evidence.strip().lower() not in {"na", "n/a", "none", "not applicable"}
+        functional_coverage_ok = bool(test_plan) and evidence_present
+
+        chain = [
+            "pre-PROD testing claimed" if pre_prod_claimed else "no pre-PROD testing claimed",
+            "test execution evidence present" if evidence_present else "no test execution evidence",
+            (
+                "UAT required based on change context" if (uat and uat.required)
+                else "UAT not required based on change context"
+            ),
+            "functional coverage appears adequate" if functional_coverage_ok else "functional coverage remains uncertain",
+        ]
+
         findings.append(Finding(
             code="TESTING_CONTEXT",
             title="Testing requirement assessed",
@@ -168,7 +228,12 @@ class TestingAgent(BaseAgent):
             self.name,
             findings,
             ([{"name": "UAT", "required": uat.required, "reason": uat.reason}] if uat else []),
-            {},
+            {
+                "chain": chain,
+                "pre_prod_claimed": pre_prod_claimed,
+                "evidence_present": evidence_present,
+                "functional_coverage_ok": functional_coverage_ok,
+            },
         )
 
 
@@ -176,8 +241,28 @@ class RiskAgent(BaseAgent):
     name = "risk"
 
     def run(self, context: AgentContext) -> AgentResult:
-        risk = str(context.cr.get("Risk") or "").strip()
-        impact = str(context.cr.get("Risk and impact analysis") or "").strip()
+        from .rules import context_flags
+
+        cr = context.cr
+        risk = str(cr.get("Risk") or "").strip()
+        impact = str(cr.get("Risk and impact analysis") or "").strip()
+        flags = context_flags(cr)
+        elevated_impact = bool(flags.get("elevated-impact"))
+        declared_low = risk.lower() in {"low", "none", "minimal", "minimal risk"}
+        contradiction = declared_low and elevated_impact
+
+        # Simple, explainable confidence: penalize a missing declared risk and a
+        # detected risk/impact contradiction; otherwise a populated impact
+        # narrative earns more confidence than a bare risk label alone.
+        confidence = 0.5
+        if risk:
+            confidence += 0.2
+        if impact:
+            confidence += 0.2
+        if contradiction:
+            confidence -= 0.3
+        confidence = round(max(0.05, min(0.95, confidence)), 2)
+
         findings: list[Finding] = []
         if not risk:
             findings.append(Finding(
@@ -186,6 +271,15 @@ class RiskAgent(BaseAgent):
                 severity=FindingSeverity.WARNING,
                 message="Risk is not populated in the CR.",
             ))
+        if contradiction:
+            findings.append(Finding(
+                code="RISK_IMPACT_CONTRADICTION",
+                title="Declared risk conflicts with impact narrative",
+                severity=FindingSeverity.WARNING,
+                message=f"Risk is declared {risk!r} but the change context suggests elevated production impact.",
+                technical_detail=impact[:2000],
+                recommendation="Reconcile the declared risk level with the described impact before CAB review.",
+            ))
         findings.append(Finding(
             code="RISK_CONTEXT",
             title="Risk context captured",
@@ -193,7 +287,15 @@ class RiskAgent(BaseAgent):
             message=f"Declared risk: {risk or 'unknown'}.",
             technical_detail=impact[:4000],
         ))
-        return AgentResult(self.name, findings, [], {})
+
+        impact_level = "elevated" if elevated_impact else "moderate" if impact else "unstated"
+        chain = [
+            f"declared risk = {risk or 'unknown'}",
+            f"impact narrative suggests {impact_level} production exposure" if impact else "no impact narrative provided",
+            "contradiction: declared risk conflicts with impact narrative" if contradiction else "no direct contradiction",
+            f"confidence {confidence:.2f}",
+        ]
+        return AgentResult(self.name, findings, [], {"chain": chain, "risk_confidence": confidence, "contradiction": contradiction})
 
 
 class EvidenceAgent(BaseAgent):
@@ -256,7 +358,28 @@ class CloneAgent(BaseAgent):
                     recommendation="Reuse only the stable structure and revalidate every changed field/evidence item.",
                 )
             )
-        return AgentResult(self.name, findings, [], {"clone_candidates": analyses[:5]})
+        if analyses:
+            top = analyses[0]
+            plural = "es" if len(analyses) != 1 else ""
+            changed = top.get("changed_fields") or []
+            chain = [
+                f"{len(analyses)} historical match{plural}",
+                (
+                    f"strongest match was {top['historical_decision']}" if top.get("historical_decision")
+                    else "strongest match has no recorded historical outcome"
+                ),
+                (
+                    f"current CR differs in: {', '.join(changed[:3])}" if changed
+                    else "no material field differences identified vs. strongest match"
+                ),
+                (
+                    "historical outcome cannot be directly reused" if top.get("recommendation") != "CLONE_CANDIDATE"
+                    else "historical outcome may inform, but does not substitute for, this decision"
+                ),
+            ]
+        else:
+            chain = ["no historical matches found"]
+        return AgentResult(self.name, findings, [], {"clone_candidates": analyses[:5], "chain": chain})
 
 
 class DecisionAgent(BaseAgent):
