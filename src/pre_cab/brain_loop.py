@@ -60,7 +60,11 @@ class AgenticReasoningLoop:
         )
 
     def _build_payload(self, context: AgentContext, findings: list[Finding] | None) -> dict[str, Any]:
-        clean_cr = compact_cr(sanitize_cr_for_reasoning(context.cr))
+        # Field Agent selects the model-facing CR. Deterministic agents retain the
+        # full normalized record through context.cr; GPT sees only decision-relevant
+        # fields to control token use and avoid noise from dozens of unused columns.
+        selected_cr = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
+        clean_cr = compact_cr(sanitize_cr_for_reasoning(selected_cr))
         memories = self._memories(clean_cr)
         payload = build_reasoning_payload(clean_cr, memories=memories, prior_findings=findings or [])
         payload = sanitize_value(payload)
@@ -68,6 +72,11 @@ class AgenticReasoningLoop:
         payload["retrieved_memory"] = compact_memory(list(payload.get("retrieved_memory") or []), limit=8)
         payload["prior_findings"] = compact_findings(list(payload.get("prior_findings") or []), limit=24)
         payload["strictness"] = context.strictness.value
+        payload["field_selection"] = {
+            "selected_field_count": len(selected_cr),
+            "selected_fields": list(selected_cr.keys()),
+            "selection_source": "field-agent-policy-and-historical-intelligence",
+        }
         payload["evidence"] = compact_evidence(sanitize_value(list(context.evidence or ())), limit=10)
         payload["self_critique_questions"] = list(self_critique_questions())
         payload["output_contract"] = {
@@ -87,7 +96,8 @@ class AgenticReasoningLoop:
             "Return ONLY one valid JSON object. Do not use markdown. Include every key named in "
             "output_contract. Analyze the actual CR and the specialist findings; do not merely restate "
             "field presence. Explain why the change is or is not ready. Use historical memory and clone "
-            "information when available. UAT is contextual, not universal. A rollback is acceptable only "
+            "information when available. The CR shown here is intentionally field-selected; do not infer "
+            "that omitted fields are missing. UAT is contextual, not universal. A rollback is acceptable only "
             "when it represents a credible recovery mechanism. Never invent approvals, testing, evidence, "
             "history, or policy. Distinguish facts, inferences, and uncertainties. Challenge the conclusion "
             "for false-PASS risk before finalizing."
@@ -130,7 +140,8 @@ class AgenticReasoningLoop:
                 reasoning_effort="high",
             )
 
-        clean_cr = compact_cr(sanitize_cr_for_reasoning(context.cr))
+        selected_cr = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
+        clean_cr = compact_cr(sanitize_cr_for_reasoning(selected_cr))
         memories = self._memories(clean_cr)
         memory_view = tuple(
             {
