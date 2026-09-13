@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -84,7 +85,40 @@ def normalize_cr_record(record: dict[str, Any]) -> dict[str, Any]:
         value = first_value(record, *names)
         if value is not None:
             normalized[canonical] = value
+
+    # Real ServiceNow-export-via-Excel data commonly carries date/datetime columns
+    # as raw Excel serial numbers (e.g. 45872.52) once converted to JSON, since the
+    # xlsx->JSON step doesn't know those columns are dates. A raw float is useless
+    # (and actively misleading) to anything downstream that reads it as text -
+    # human-facing reports, CAB summaries, or a training example fed to an LLM
+    # would all see a meaningless number instead of a date. Convert in place.
+    for canonical in ("Planned start", "Planned end"):
+        value = normalized.get(canonical)
+        iso = _excel_serial_to_iso(value)
+        if iso is not None:
+            normalized[canonical] = iso
     return normalized
+
+
+def _excel_serial_to_iso(value: Any) -> str | None:
+    """Convert a plausible Excel serial date/datetime number to an ISO string.
+
+    Returns None for anything that isn't a bare int/float in a plausible date
+    range (roughly 1970-2100) - a real date string, None, or other type passes
+    through untouched by the caller.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    # Excel's day-0 epoch is 1899-12-30 (accounts for Excel's 1900 leap-year bug).
+    # Serial ~25569 = 1970-01-01; ~73050 = 2100-01-01 - outside that, it's very
+    # unlikely to actually be a date serial, so leave it alone rather than guess.
+    if not (25569 <= value <= 73050):
+        return None
+    epoch = datetime(1899, 12, 30)
+    try:
+        return (epoch + timedelta(days=float(value))).isoformat()
+    except (OverflowError, ValueError):
+        return None
 
 
 def normalize_change_type(value: Any) -> str:
