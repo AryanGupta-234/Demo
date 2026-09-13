@@ -35,6 +35,17 @@ python training/train_qlora.py --dataset-dir /kaggle/working/pre_cab_dataset --o
 python training/evaluate.py --adapter /kaggle/working/pre_cab_gptoss20b_v1 --holdout /kaggle/working/pre_cab_dataset/holdout_reasoning.jsonl
 ```
 
+## Known limitation: field_requirements is not split-aware
+
+`field_requirement_context()` in `build_dataset.py` reuses `config/field_requirements.generated.json`,
+which was mined (by `scripts/mine_field_requirements.py`) from the *entire* real historical export in
+one pass - not separately re-mined per train/validation/holdout split. This is direct-leakage-safe (no
+individual record's own outcome field is ever exposed to itself), but it means a holdout record's text
+could have contributed, in aggregate, to the requirement-level statistics and work-note-signal lexicon it
+is later evaluated against. This is a second-order, aggregate-level effect, not a per-record label leak -
+but `evaluate.py`'s holdout accuracy should be read as mildly optimistic until the rule table is re-mined
+train-split-only for a rigorous benchmark run.
+
 ## Learning / evolution design
 
 The training corpus intentionally has several tasks instead of one hard-coded classifier:

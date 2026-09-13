@@ -19,24 +19,64 @@ if str(SRC) not in sys.path:
 from pre_cab.cab_outcomes import normalize_cab_recommendation
 from pre_cab.input_loader import load_cr_records, normalize_cr_record, record_type, source_id
 from pre_cab.benchmark_leakage import strip_post_decision_fields
+from pre_cab.field_requirement_engine import FieldRequirementEngine, RequirementLevel
+from pre_cab.rules import context_flags
 
 
+# Ordered REQUIRED -> CONDITIONAL -> OPTIONAL, per the real 2,013-record historical
+# export mined into config/field_requirements.generated.json (global bucket). Most
+# decision-relevant fields come first so a compact/truncated context still carries
+# the highest-value fields. "Change plan" is deliberately excluded: it is
+# NOT_OBSERVED (0.00 fill rate) across every real Normal CR in the dataset - this
+# org has never once used it, so it is pure noise to a model learning this org's
+# actual patterns, not this org's actual behavior.
 DESCRIPTIVE_FIELDS = [
-    "Short description", "Description", "Justification", "Implementation plan",
-    "Change plan", "Backout plan", "Test plan", "Configuration item", "Risk", "Priority",
-    "Risk and impact analysis", "Environment", "Change Class",
+    "Short description", "Description", "Justification", "Implementation plan", "Priority",
+    "Test plan", "Backout plan", "Risk", "Risk and impact analysis", "Change Class",
+    "Configuration item", "Environment",
 ]
 SIGNOFF_FIELDS = [
-    "UAT signoff", "Customer Approval", "TCS QA signoff",
-    "Test Results Evidence", "Lower Environment Reference CR/SR",
+    "Customer Approval", "Test Results Evidence", "UAT signoff",
+    "TCS QA signoff", "Lower Environment Reference CR/SR",
 ]
 CONTEXT_FIELDS = [
-    "Number", "Type", "Category", "Sub Category", "Environment", "Change Class",
+    "Number", "Type", "Category", "Sub Category",
     "Conflict status", "Planned start", "Planned end",
 ]
 NOTE_FIELDS = ["Comments and Work notes", "Work notes", "Notes"]
 
 NOTE_HEADER_RE = re.compile(r"\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2} - [^()]+?\([^)]*\)\s*", re.MULTILINE)
+
+FIELD_REQUIREMENT_ENGINE = FieldRequirementEngine()
+
+SYSTEM_PROMPT = (
+    "You are the Pre-CAB reasoning specialist for a real ServiceNow Change Advisory "
+    "Board pipeline. You are given: (1) the CR's own fields, selected because the "
+    "org's real historical data shows they carry decision-relevant signal, and (2) "
+    "field_requirements - a deterministic, data-mined verdict per field for this "
+    "CR's specific Category/Sub Category, already computed from real historical "
+    "fill/disposition rates. field_requirements is evidence, not a suggestion: "
+    "treat a REQUIRED-and-unsatisfied field as a real gap, and do not claim a field "
+    "is satisfied when its own entry says otherwise. Where field_requirements is "
+    "silent or its scope is 'global' (a category with little historical precedent), "
+    "say so as an uncertainty rather than guessing organizational policy.\n\n"
+    "Decision framework:\n"
+    "PASS - no blocking issues and sufficient confidence/evidence.\n"
+    "CONDITIONAL - no hard blocker, but specific unresolved items remain before approval.\n"
+    "NOT_READY - a hard blocker, a major contradiction, or material missing mandatory evidence.\n\n"
+    "Rules: UAT is contextual, not universally mandatory - infer applicability from "
+    "the change type, do not assume every change needs it. A short rollback "
+    "description can still be credible; judge the mechanism, not the word count. "
+    "Never invent evidence, approvals, testing, or historical outcomes that are not "
+    "present in the given context. A contradiction (e.g. declared risk is low but "
+    "the impact narrative describes significant production/customer exposure) must "
+    "be surfaced explicitly, not smoothed over.\n\n"
+    "Respond with exactly these keys: facts, technical_reasoning, testing_reasoning, "
+    "risk_reasoning, uncertainties, contradictions, cab_questions, recommendations, "
+    "prediction. The four *_reasoning arrays are terse declarative bullet lines "
+    "(e.g. 'implementation is present', 'no direct contradiction'), matching this "
+    "system's existing deterministic agents so your output can sit alongside theirs."
+)
 
 
 def present(value: Any) -> bool:
@@ -129,42 +169,99 @@ def note_signals(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def technical_chain(row: dict[str, Any]) -> list[str]:
-    implementation = str(row.get("Implementation plan") or "").strip()
-    backout = str(row.get("Backout plan") or "").strip()
-    ci = str(row.get("Configuration item") or "").strip()
-    lower = str(row.get("Lower Environment Reference CR/SR") or "").strip()
-    chain = [
-        "implementation is present" if implementation else "implementation is not described",
-        "configuration item identified" if ci else "configuration item not identified",
-        "rollback text is present" if backout else "rollback mechanism not described",
-        "lower-environment reference present" if lower else "no explicit lower-environment reference",
-    ]
-    return chain
+def technical_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Reuse the real, production TechnicalAgent so the fine-tuned model learns to
+    mimic exactly what the deterministic system already produces, rather than a
+    second, slightly-different reimplementation drifting out of sync over time."""
+    from pre_cab.agents import TechnicalAgent
+    from pre_cab.schemas import AgentContext
+
+    result = TechnicalAgent().run(AgentContext(cr=row))
+    chain = result.notes.get("chain", [])
+    uncertainties = [f"technical uncertainty: {result.notes.get('technical_uncertainty', 'unknown')}"]
+    return chain, uncertainties
 
 
-def testing_chain(row: dict[str, Any]) -> list[str]:
-    test_plan = str(row.get("Test plan") or "").strip()
-    evidence = str(row.get("Test Results Evidence") or "").strip()
-    uat = str(row.get("UAT signoff") or "").strip()
-    return [
-        "test plan present" if test_plan else "test plan missing",
-        "test execution evidence present" if evidence else "no test execution evidence",
-        f"UAT disposition = {uat}" if uat else "UAT disposition not recorded",
-    ]
+def testing_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
+    from pre_cab.agents import TestingAgent
+    from pre_cab.schemas import AgentContext
+
+    result = TestingAgent().run(AgentContext(cr=row))
+    chain = result.notes.get("chain", [])
+    uncertainties = [] if result.notes.get("functional_coverage_ok") else ["functional test coverage is not fully confirmed"]
+    return chain, uncertainties
+
+
+def risk_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
+    from pre_cab.agents import RiskAgent
+    from pre_cab.schemas import AgentContext
+
+    result = RiskAgent().run(AgentContext(cr=row))
+    chain = result.notes.get("chain", [])
+    contradictions = (
+        [f"declared risk ({row.get('Risk') or 'unknown'}) conflicts with the described impact"]
+        if result.notes.get("contradiction") else []
+    )
+    return chain, contradictions
+
+
+def field_requirement_context(row: dict[str, Any]) -> dict[str, Any]:
+    """The exact same data-mined per-category verdicts the production decision
+    gate uses (see field_requirement_engine.py) - this is the primary answer to
+    "only feed the model the fields that actually matter": rather than a flat
+    field dump, the model sees which fields THIS org's real history says are
+    REQUIRED/CONDITIONAL/OPTIONAL for THIS CR's specific Category/Sub Category,
+    with the real support counts behind each verdict.
+    """
+    report = FIELD_REQUIREMENT_ENGINE.evaluate(row)
+    return {
+        "resolved_scope": report.resolved_scope,
+        "gaps": [
+            {"field": f.field, "requirement_level": f.requirement_level.value, "evidence": f.evidence}
+            for f in report.findings
+            if not f.satisfied and f.requirement_level in (RequirementLevel.REQUIRED, RequirementLevel.CONDITIONAL)
+        ],
+        "note_signals": [
+            {"phrase": s.phrase, "evidence": s.evidence} for s in report.note_signals
+        ],
+    }
+
+
+def _cab_questions(fr_context: dict[str, Any], test_uncertainties: list[str]) -> list[str]:
+    questions: list[str] = []
+    if test_uncertainties:
+        questions.append("What functional scenarios were tested?")
+    if fr_context["gaps"]:
+        gap = fr_context["gaps"][0]["field"]
+        questions.append(f"Can {gap} be confirmed or explicitly justified as not applicable?")
+    if fr_context["note_signals"]:
+        questions.append("Do this CR's work notes indicate it may be withdrawn or reworked?")
+    return questions[:4] or ["Are there any residual concerns not captured in the CR fields?"]
+
+
+def _recommendations(fr_context: dict[str, Any]) -> list[str]:
+    recs = [f"Populate or justify {gap['field']} before CAB review." for gap in fr_context["gaps"][:3]]
+    recs.append("Confirm final CAB evidence before approval.")
+    return recs
 
 
 def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> dict[str, Any]:
     selected = select_fields(row, profiles)
     notes = note_text(row)
+    fr_context = field_requirement_context(row)
+    tech_reasoning, tech_uncertainties = technical_chain(row)
+    test_reasoning, test_uncertainties = testing_chain(row)
+    risk_reasoning, risk_contradictions = risk_chain(row)
+
     target = {
         "facts": [f"{k} is populated" for k, v in selected.items() if present(v)],
-        "technical_reasoning": technical_chain(row),
-        "testing_reasoning": testing_chain(row),
-        "uncertainties": [],
-        "contradictions": [],
-        "cab_questions": [],
-        "recommendations": [],
+        "technical_reasoning": tech_reasoning,
+        "testing_reasoning": test_reasoning,
+        "risk_reasoning": risk_reasoning,
+        "uncertainties": tech_uncertainties + test_uncertainties,
+        "contradictions": risk_contradictions,
+        "cab_questions": _cab_questions(fr_context, test_uncertainties),
+        "recommendations": _recommendations(fr_context),
     }
     label = outcome(row)
     if label is not None:
@@ -172,6 +269,7 @@ def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
     user_context = {
         "task": "PRE_CAB_ANALYSIS",
         "cr": selected,
+        "field_requirements": fr_context,
         "note_signal": {
             "available": bool(notes),
             "note_fields_present": [f for f in NOTE_FIELDS if present(row.get(f))],
@@ -179,7 +277,7 @@ def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
     }
     return {
         "messages": [
-            {"role": "system", "content": "You are a Pre-CAB reasoning specialist. Separate facts, inferences, uncertainty, contradictions, and recommendations. UAT is contextual. Never invent evidence."},
+            {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(user_context, ensure_ascii=False, default=str)},
             {"role": "assistant", "content": json.dumps(target, ensure_ascii=False, default=str)},
         ],
