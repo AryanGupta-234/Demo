@@ -31,5 +31,5 @@ select = ["E9", "F63", "F7", "F82"]
 where = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["sentence_transformers.*", "fastapi.*", "openpyxl.*", "pypdf.*"]
+module = ["sentence_transformers.*", "fastapi.*", "openpyxl.*", "pypdf.*", "groq.*", "openai.*"]
 ignore_missing_imports = true

@@ -33,7 +33,14 @@ def main() -> int:
         raise SystemExit("Input JSON contains no CR records")
 
     # GPT-OSS is the generative reasoning layer. V1 intentionally uses Groq first;
-    # Hugging Face remains available as an explicit/automatic fallback.
+    # Hugging Face remains available as an explicit/automatic fallback. It is
+    # never a prerequisite for the deterministic engine, though: the one-command
+    # tool must still work with zero setup (see run_pre_cab/run_stage1 - the
+    # deterministic safety reconciliation is the final authority regardless of
+    # whether a model ran at all). A missing/failing provider degrades to
+    # deterministic-only validation, unless the user explicitly named one with
+    # --provider, in which case failing to honor that choice silently would be
+    # more confusing than just saying so.
     model = None
     have_credentials = any(os.getenv(name) for name in ("GROQ_API_KEY", "HF_TOKEN"))
     if args.provider or have_credentials:
@@ -41,14 +48,11 @@ def main() -> int:
             model = build_runtime_provider(args.provider)
             print(f"LLM provider/model: {getattr(model, 'model_name', type(model).__name__)}")
         except Exception as exc:
-            raise SystemExit(
-                f"Could not initialize GPT-OSS 120B provider: {type(exc).__name__}: {exc}"
-            ) from exc
+            if args.provider:
+                raise SystemExit(f"Could not initialize GPT-OSS 120B provider: {type(exc).__name__}: {exc}") from exc
+            print(f"LLM unavailable: {type(exc).__name__}: {exc}; continuing with deterministic evaluation only.")
     else:
-        raise SystemExit(
-            "GPT-OSS 120B credentials not detected. Set GROQ_API_KEY (primary) "
-            "or HF_TOKEN, then run again."
-        )
+        print("No GPT-OSS credentials detected; continuing with deterministic validation only.")
 
     memory = SQLiteUnifiedMemory(Path(".pre_cab") / "memory.sqlite3")
     audit = SQLiteAuditStore(Path(".pre_cab") / "audit.sqlite3")
