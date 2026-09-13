@@ -54,8 +54,8 @@ def main() -> int:
     if args.limit:
         rows = rows[:args.limit]
 
-    actual = Counter()
-    predicted = Counter()
+    actual: Counter[str] = Counter()
+    predicted: Counter[str] = Counter()
     correct = 0
     scored = 0
     false_pass = 0
@@ -67,7 +67,8 @@ def main() -> int:
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         outputs = model.generate(**inputs, max_new_tokens=700, do_sample=False)
         generated = outputs[0][inputs["input_ids"].shape[-1]:]
-        text = tokenizer.decode(generated, skip_special_tokens=True)
+        decoded = tokenizer.decode(generated, skip_special_tokens=True)
+        text = decoded if isinstance(decoded, str) else " ".join(decoded)
         result = extract_json(text) or {}
         pred = result.get("prediction")
         gold = row.get("metadata", {}).get("historical_outcome")

@@ -93,7 +93,12 @@ def select_fields(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
     for field in CONTEXT_FIELDS:
         if present(row.get(field)):
             selected[field] = row.get(field)
-    return selected
+    # Defense in depth: the allowlists above are the primary leakage control, but
+    # if a post-decision field (CAB Outcome, State, Close notes, Approval history,
+    # ...) is ever accidentally added to one of them later, this still keeps it
+    # out of the model-visible context rather than relying solely on the allowlist
+    # having been written correctly.
+    return strip_post_decision_fields(selected)
 
 
 def outcome(row: dict[str, Any]):
