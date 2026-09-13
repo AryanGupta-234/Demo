@@ -29,19 +29,24 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate a trained Pre-CAB adapter on untouched holdout records")
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--holdout", type=Path, required=True)
+    parser.add_argument("--base-model", default="unsloth/gpt-oss-20b")
     parser.add_argument("--limit", type=int, default=0)
     args = parser.parse_args()
 
+    from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(args.adapter)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.adapter,
+    tokenizer = AutoTokenizer.from_pretrained(args.base_model)
+    base = AutoModelForCausalLM.from_pretrained(
+        args.base_model,
         device_map="auto",
         torch_dtype="auto",
+        load_in_4bit=True,
     )
+    model = PeftModel.from_pretrained(base, args.adapter)
+    model.eval()
 
-    rows = []
+    rows: list[dict[str, Any]] = []
     with args.holdout.open("r", encoding="utf-8") as f:
         for line in f:
             if line.strip():
@@ -61,7 +66,8 @@ def main() -> int:
         prompt = tokenizer.apply_chat_template(messages[:2], tokenize=False, add_generation_prompt=True)
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         outputs = model.generate(**inputs, max_new_tokens=700, do_sample=False)
-        text = tokenizer.decode(outputs[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
+        generated = outputs[0][inputs["input_ids"].shape[-1]:]
+        text = tokenizer.decode(generated, skip_special_tokens=True)
         result = extract_json(text) or {}
         pred = result.get("prediction")
         gold = row.get("metadata", {}).get("historical_outcome")
@@ -90,6 +96,7 @@ def main() -> int:
         "actual_distribution": dict(actual),
         "predicted_distribution": dict(predicted),
         "adapter": str(args.adapter),
+        "base_model": args.base_model,
     }
     out = args.adapter / "holdout_report.json"
     out.write_text(json.dumps(report, indent=2), encoding="utf-8")
