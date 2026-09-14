@@ -1,9 +1,4 @@
-"""Adaptive local reasoning loop for the Pre-CAB validator.
-
-The current manager-demo path uses Ollama/qwen2.5:7b-instruct. The reasoning
-brain receives selected CR fields, work-note channels, deterministic findings,
-and an optional compact historical context pack built from the mapped corpus.
-"""
+"""Adaptive local reasoning loop for the Pre-CAB validator."""
 from __future__ import annotations
 
 import json
@@ -22,6 +17,9 @@ from .schemas import AgentContext, Finding
 
 _JSON_OBJECT_FORMAT = {"type": "json_object"}
 _NOTE_FIELDS = ("Comments and Work notes", "Work notes", "Notes")
+_REQUIREMENT_CONTEXT_FIELDS = (
+    "Priority", "Risk and impact analysis", "Lower Environment Reference CR/SR", "TCS QA signoff",
+)
 
 
 @dataclass(frozen=True)
@@ -34,7 +32,7 @@ class ReasoningLoopResult:
 
 
 class AgenticReasoningLoop:
-    """Reason over the CR, requirements, work notes and historical context."""
+    """Reason over CR evidence, applicable requirements, work notes and history."""
 
     def __init__(self, model: ModelProvider, memory: UnifiedMemory | None = None, limit: int = 12, mode: str | None = None) -> None:
         self.model = model
@@ -55,24 +53,18 @@ class AgenticReasoningLoop:
 
     @staticmethod
     def _work_notes(cr: dict[str, Any]) -> dict[str, str]:
-        result: dict[str, str] = {}
-        for field in _NOTE_FIELDS:
-            value = cr.get(field)
-            if value is not None and str(value).strip():
-                result[field] = str(value).strip()
-        return result
+        return {field: str(cr[field]).strip() for field in _NOTE_FIELDS if cr.get(field) is not None and str(cr[field]).strip()}
 
     @staticmethod
     def _historical_context() -> dict[str, Any] | None:
-        path_value = os.getenv("PRE_CAB_TRAINING_CONTEXT", "").strip()
-        if not path_value:
+        raw = os.getenv("PRE_CAB_TRAINING_CONTEXT", "").strip()
+        if not raw:
             return None
-        path = Path(path_value)
+        path = Path(raw)
         if not path.exists():
             return {"status": "missing", "path": str(path)}
         try:
-            with path.open("r", encoding="utf-8") as handle:
-                value = json.load(handle)
+            value = json.loads(path.read_text(encoding="utf-8"))
             return value if isinstance(value, dict) else {"status": "invalid", "path": str(path)}
         except Exception as exc:
             return {"status": "unreadable", "path": str(path), "error": f"{type(exc).__name__}: {exc}"}
@@ -83,13 +75,12 @@ class AgenticReasoningLoop:
             return None
         records = []
         for record in list(value.get("records") or []):
-            if not isinstance(record, dict):
-                continue
-            records.append({
-                "cr": record.get("cr", {}),
-                "requirements": record.get("requirements", {}),
-                "work_notes": str(record.get("work_notes") or "")[:500],
-            })
+            if isinstance(record, dict):
+                records.append({
+                    "cr": record.get("cr", {}),
+                    "requirements": record.get("requirements", {}),
+                    "work_notes": str(record.get("work_notes") or "")[:240],
+                })
         return {
             "version": value.get("version"),
             "records_mapped": value.get("records_mapped", len(records)),
@@ -99,11 +90,17 @@ class AgenticReasoningLoop:
         }
 
     def _build_payload(self, context: AgentContext, findings: list[Finding] | None) -> dict[str, Any]:
-        selected_cr = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
+        base = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
+        selected_cr = dict(base)
+        # These are not random extras: they are the fields the training mapping
+        # treats as high-value requirement/risk context. Keep them even when the
+        # field selector did not see a populated value on this particular CR.
+        for field in _REQUIREMENT_CONTEXT_FIELDS:
+            if field in context.cr and context.cr.get(field) not in (None, "", [], {}):
+                selected_cr[field] = context.cr[field]
         clean_cr = compact_cr(sanitize_cr_for_reasoning(selected_cr))
         memories = self._memories(clean_cr)
-        payload = build_reasoning_payload(clean_cr, memories=memories, prior_findings=findings or [])
-        payload = sanitize_value(payload)
+        payload = sanitize_value(build_reasoning_payload(clean_cr, memories=memories, prior_findings=findings or []))
         payload["cr"] = compact_cr(dict(payload.get("cr") or {}))
         payload["retrieved_memory"] = compact_memory(list(payload.get("retrieved_memory") or []), limit=8)
         payload["prior_findings"] = compact_findings(list(payload.get("prior_findings") or []), limit=18)
@@ -127,7 +124,7 @@ class AgenticReasoningLoop:
         payload["field_selection"] = {
             "selected_field_count": len(selected_cr),
             "selected_fields": list(selected_cr.keys()),
-            "selection_source": "field-agent-policy-and-historical-intelligence",
+            "selection_source": "field-agent-plus-high-value-requirement-context",
         }
         payload["evidence"] = compact_evidence(sanitize_value(list(context.evidence or ())), limit=8)
         payload["self_critique_questions"] = list(self_critique_questions())
@@ -138,38 +135,35 @@ class AgenticReasoningLoop:
             "inferences": "array of reasoned conclusions grounded in facts",
             "uncertainties": "array of unresolved items",
             "contradictions": "array of detected inconsistencies",
-            "technical_reasoning": "substantive technical assessment in a few sentences",
-            "cab_reasoning": "plain-language CAB decision rationale in a few sentences",
+            "technical_reasoning": "substantive technical assessment",
+            "cab_reasoning": "plain-language CAB decision rationale",
             "cab_questions": "array of up to 4 useful CAB questions",
             "recommendations": "array of up to 4 concrete next actions",
             "self_critique": "array of concise checks used to challenge the conclusion",
         }
         payload["instruction"] = (
-            "Return ONLY one valid JSON object. First establish requirement applicability and evidence coverage; "
-            "then reason about readiness. Work notes are chronological auxiliary evidence: use useful claims, "
-            "but do not let a later note silently overwrite the current CR field. Historical training context is "
-            "reference material, not current-CR evidence; identify patterns and delta-check them. Never copy a "
-            "historical prediction. Do not infer omitted fields are missing. UAT is contextual. Rollback must be "
-            "a credible recovery mechanism. Never invent approvals, testing, evidence, history, or policy. "
-            "Separate facts, inferences, uncertainties and contradictions, and challenge false-PASS risk."
+            "Return ONLY one valid JSON object. First map applicable requirements to evidence, then reason about readiness. "
+            "Use every supplied CR field that is relevant. Work notes are chronological auxiliary evidence: use their "
+            "claims but do not let a later note silently overwrite a current field. Historical context is reference material, "
+            "not current-CR evidence; use it to identify patterns and delta-check them. Never copy a historical prediction. "
+            "Do not infer omitted fields are missing. UAT is contextual. Rollback must be a credible recovery mechanism. "
+            "Never invent approvals, testing, evidence, history, or policy. Separate facts, inferences, uncertainties and "
+            "contradictions, and challenge false-PASS risk."
         )
         return payload
 
     def run(self, context: AgentContext, findings: list[Finding] | None = None) -> ReasoningLoopResult:
         payload = self._build_payload(context, findings)
         initial = self.model.generate(system=build_reasoning_system_prompt(), user=json.dumps(payload, ensure_ascii=False, default=str), temperature=0.05, response_format=_JSON_OBJECT_FORMAT, reasoning_effort=self.reasoning_effort)
-        critique: ModelResponse | None = None
+        critique = None
         if self.mode == "dual":
-            critique_payload = {"original_context": payload, "initial_reasoning": initial.text, "critique_contract": {"challenge_every_inference": True, "never_upgrade_unknown_to_fact": True, "never_invent_evidence": True, "look_for_contradictions": True, "look_for_false_pass_risk": True, "return_only_valid_json": True}}
             critique = self.model.generate(
-                system=build_reasoning_system_prompt() + " You are an independent adversarial reviewer. Return one valid JSON object using the same output contract and revise the prediction when warranted.",
-                user=json.dumps(critique_payload, ensure_ascii=False, default=str),
+                system=build_reasoning_system_prompt() + " You are an independent adversarial reviewer. Return valid JSON using the same output contract and revise the prediction when warranted.",
+                user=json.dumps({"original_context": payload, "initial_reasoning": initial.text, "critique_contract": {"challenge_every_inference": True, "never_upgrade_unknown_to_fact": True, "never_invent_evidence": True, "look_for_contradictions": True, "look_for_false_pass_risk": True}}, ensure_ascii=False, default=str),
                 temperature=0.0,
                 response_format=_JSON_OBJECT_FORMAT,
                 reasoning_effort=self.reasoning_effort,
             )
-        selected_cr = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
-        clean_cr = compact_cr(sanitize_cr_for_reasoning(selected_cr))
-        memories = self._memories(clean_cr)
-        memory_view = tuple({"id": m.memory_id, "kind": m.kind.value, "text": m.text, "metadata": m.metadata, "score": m.score} for m in memories)
+        clean_cr = compact_cr(sanitize_cr_for_reasoning(selected_cr if isinstance(selected_cr, dict) else context.cr)) if False else compact_cr(sanitize_cr_for_reasoning(context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr))
+        memory_view = tuple({"id": m.memory_id, "kind": m.kind.value, "text": m.text, "metadata": m.metadata, "score": m.score} for m in self._memories(clean_cr))
         return ReasoningLoopResult(initial=initial, critique=critique, retrieved_memory=memory_view, questions=self_critique_questions(), mode=self.mode)
