@@ -30,6 +30,12 @@ def main() -> int:
         "--include-emergency", action="store_true",
         help="Also process Emergency-type changes (excluded by default - this system is scoped to Normal CAB review).",
     )
+    parser.add_argument(
+        "--limit", type=int, default=0,
+        help="Process only the first N in-scope records. Each record with an LLM provider costs one "
+             "sequential generation call (roughly 20-30s on a local model like Ollama) - for a large "
+             "file, test on a small --limit first rather than committing to the full run blind.",
+    )
     args = parser.parse_args()
 
     records = load_cr_records(args.cr_json)
@@ -51,6 +57,10 @@ def main() -> int:
             print(f"Excluded {excluded} Emergency-type record(s) (use --include-emergency to process them too).")
     if not records:
         raise SystemExit("No in-scope records to process after filtering (all were Emergency-type).")
+
+    if args.limit and args.limit < len(records):
+        print(f"Limiting to the first {args.limit} of {len(records)} in-scope records (--limit).")
+        records = records[: args.limit]
 
     # GPT-OSS is the generative reasoning layer. V1 intentionally uses Groq first;
     # Hugging Face remains available as an explicit/automatic fallback. It is
@@ -123,6 +133,11 @@ def main() -> int:
                 json.dumps(report, indent=2, ensure_ascii=False, default=str),
                 encoding="utf-8",
             )
+            # Plain, human-readable companion file - the .json above is for tooling/audit
+            # (agent_chains_text/cab_block_text sit inside it as escaped JSON strings,
+            # unreadable at a glance); this .txt is what a person should actually open.
+            readable = f"{report['agent_chains_text']}\n\n{report['cab_block_text']}\n"
+            (args.output_dir / f"{number}_pre_cab.txt").write_text(readable, encoding="utf-8")
             reports.append(report)
         except Exception as exc:
             report = {
