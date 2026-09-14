@@ -23,7 +23,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="One-command Pre-CAB validation for one or many CRs")
     parser.add_argument("cr_json", type=Path)
     parser.add_argument("--strictness", choices=[s.value for s in Strictness], default="balanced")
-    parser.add_argument("--provider", choices=["auto", "groq", "huggingface"], default=None)
+    parser.add_argument("--provider", choices=["auto", "groq", "huggingface", "ollama"], default=None)
     parser.add_argument("--attachment-root", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/pre_cab"))
     args = parser.parse_args()
