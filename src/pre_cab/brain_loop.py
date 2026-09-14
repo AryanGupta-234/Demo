@@ -17,9 +17,7 @@ from .schemas import AgentContext, Finding
 
 _JSON_OBJECT_FORMAT = {"type": "json_object"}
 _NOTE_FIELDS = ("Comments and Work notes", "Work notes", "Notes")
-_REQUIREMENT_CONTEXT_FIELDS = (
-    "Priority", "Risk and impact analysis", "Lower Environment Reference CR/SR", "TCS QA signoff",
-)
+_REQUIREMENT_CONTEXT_FIELDS = ("Priority", "Risk and impact analysis", "Lower Environment Reference CR/SR", "TCS QA signoff")
 
 
 @dataclass(frozen=True)
@@ -76,25 +74,12 @@ class AgenticReasoningLoop:
         records = []
         for record in list(value.get("records") or []):
             if isinstance(record, dict):
-                records.append({
-                    "cr": record.get("cr", {}),
-                    "requirements": record.get("requirements", {}),
-                    "work_notes": str(record.get("work_notes") or "")[:240],
-                })
-        return {
-            "version": value.get("version"),
-            "records_mapped": value.get("records_mapped", len(records)),
-            "context_buckets": list(value.get("context_buckets") or []),
-            "historical_note_phrases": list(value.get("historical_note_phrases") or [])[:40],
-            "records": records,
-        }
+                records.append({"cr": record.get("cr", {}), "requirements": record.get("requirements", {}), "work_notes": str(record.get("work_notes") or "")[:240]})
+        return {"version": value.get("version"), "records_mapped": value.get("records_mapped", len(records)), "context_buckets": list(value.get("context_buckets") or []), "historical_note_phrases": list(value.get("historical_note_phrases") or [])[:40], "records": records}
 
     def _build_payload(self, context: AgentContext, findings: list[Finding] | None) -> dict[str, Any]:
         base = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
         selected_cr = dict(base)
-        # These are not random extras: they are the fields the training mapping
-        # treats as high-value requirement/risk context. Keep them even when the
-        # field selector did not see a populated value on this particular CR.
         for field in _REQUIREMENT_CONTEXT_FIELDS:
             if field in context.cr and context.cr.get(field) not in (None, "", [], {}):
                 selected_cr[field] = context.cr[field]
@@ -106,26 +91,12 @@ class AgenticReasoningLoop:
         payload["prior_findings"] = compact_findings(list(payload.get("prior_findings") or []), limit=18)
         payload["strictness"] = context.strictness.value
         payload["work_notes"] = self._work_notes(context.cr)
-        payload["work_note_policy"] = {
-            "role": "auxiliary chronological evidence",
-            "do_not_treat_as_current_field_state": True,
-            "do_not_use_as_decision_label": True,
-            "distinguish_claims_from_verified_evidence": True,
-        }
+        payload["work_note_policy"] = {"role": "auxiliary chronological evidence", "do_not_treat_as_current_field_state": True, "do_not_use_as_decision_label": True, "distinguish_claims_from_verified_evidence": True}
         historical = self._compact_historical_context(self._historical_context())
         if historical is not None:
             payload["historical_training_context"] = historical
-            payload["historical_training_context_policy"] = {
-                "records_are_reference_examples_not_current_CR_facts": True,
-                "historical_outcomes_are_aggregate_context": True,
-                "never_copy_a_historical_prediction_to_the_current_CR": True,
-                "delta_validate_any_similar_pattern": True,
-            }
-        payload["field_selection"] = {
-            "selected_field_count": len(selected_cr),
-            "selected_fields": list(selected_cr.keys()),
-            "selection_source": "field-agent-plus-high-value-requirement-context",
-        }
+            payload["historical_training_context_policy"] = {"records_are_reference_examples_not_current_CR_facts": True, "historical_outcomes_are_aggregate_context": True, "never_copy_a_historical_prediction_to_the_current_CR": True, "delta_validate_any_similar_pattern": True}
+        payload["field_selection"] = {"selected_field_count": len(selected_cr), "selected_fields": list(selected_cr.keys()), "selection_source": "field-agent-plus-high-value-requirement-context"}
         payload["evidence"] = compact_evidence(sanitize_value(list(context.evidence or ())), limit=8)
         payload["self_critique_questions"] = list(self_critique_questions())
         payload["output_contract"] = {
@@ -164,6 +135,7 @@ class AgenticReasoningLoop:
                 response_format=_JSON_OBJECT_FORMAT,
                 reasoning_effort=self.reasoning_effort,
             )
-        clean_cr = compact_cr(sanitize_cr_for_reasoning(selected_cr if isinstance(selected_cr, dict) else context.cr)) if False else compact_cr(sanitize_cr_for_reasoning(context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr))
-        memory_view = tuple({"id": m.memory_id, "kind": m.kind.value, "text": m.text, "metadata": m.metadata, "score": m.score} for m in self._memories(clean_cr))
+        memory_cr = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
+        clean_memory_cr = compact_cr(sanitize_cr_for_reasoning(memory_cr))
+        memory_view = tuple({"id": m.memory_id, "kind": m.kind.value, "text": m.text, "metadata": m.metadata, "score": m.score} for m in self._memories(clean_memory_cr))
         return ReasoningLoopResult(initial=initial, critique=critique, retrieved_memory=memory_view, questions=self_critique_questions(), mode=self.mode)
