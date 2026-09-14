@@ -1,17 +1,4 @@
-"""Local Ollama adapter for the reasoning layer.
-
-Purpose: demonstrate the Pre-CAB reasoning capability against real CR data at
-zero cost, before asking anyone to budget cloud GPU time for fine-tuning. Ollama
-runs entirely on the local machine (http://localhost:11434 by default) with
-whatever model is already pulled - e.g. `ollama list` showing qwen2.5:7b-instruct.
-
-This does NOT require GROQ_API_KEY, CEREBRAS_API_KEY, or any cloud credential.
-It also is not a substitute for the fine-tuned GPT-OSS 20B path in training/ -
-a general-purpose 7B instruct model has no exposure to this org's real
-historical patterns, so treat its output as a reasoning-quality demo, not a
-production-calibrated decision source, until/unless it's evaluated the same way
-(training/evaluate.py's methodology) against real holdout outcomes.
-"""
+"""Local Ollama adapter for the Pre-CAB reasoning layer."""
 from __future__ import annotations
 
 import json
@@ -47,12 +34,19 @@ class OllamaProvider:
         response_format: dict[str, Any] | None = None,
         reasoning_effort: str = "high",
     ) -> ModelResponse:
-        # Ollama has no reasoning_effort concept (that's a Groq/Cerebras GPT-OSS
-        # dial); accepted here only for ModelProvider protocol compatibility and
-        # otherwise ignored.
         try:
             from urllib.error import URLError
             from urllib.request import Request, urlopen
+
+            # Default to Ollama's practical 32K setting. The model family supports
+            # longer context, but the actual Ollama allocation depends on the
+            # server/model configuration and available memory. Raise this only
+            # after checking `ollama ps` and available VRAM/RAM.
+            try:
+                num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "32768"))
+            except ValueError:
+                num_ctx = 32768
+            num_ctx = max(4096, min(num_ctx, 131072))
 
             payload: dict[str, Any] = {
                 "model": self.model_id,
@@ -61,12 +55,9 @@ class OllamaProvider:
                     {"role": "user", "content": user},
                 ],
                 "stream": False,
-                "options": {"temperature": temperature},
+                "options": {"temperature": temperature, "num_ctx": num_ctx},
+                "format": "json",
             }
-            # Ollama's native JSON mode: forces the model to emit a single JSON
-            # object rather than free-form text, matching what this pipeline's
-            # extract_json()-style parsing everywhere else expects.
-            payload["format"] = "json"
 
             request = Request(
                 f"{self.base_url}/api/chat",
@@ -75,7 +66,7 @@ class OllamaProvider:
                 method="POST",
             )
             try:
-                with urlopen(request, timeout=180) as response:
+                with urlopen(request, timeout=300) as response:
                     raw = json.loads(response.read().decode("utf-8"))
             except URLError as exc:
                 raise RuntimeError(
