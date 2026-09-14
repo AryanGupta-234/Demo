@@ -44,8 +44,6 @@ def _compact_cr(cr: dict[str, Any]) -> dict[str, Any]:
         value = cr.get(field)
         if _present(value):
             card[field] = str(value).strip()[:limit]
-    # Presence maps preserve the training field requirements without spending
-    # hundreds of tokens repeating long implementation/test narratives.
     card["evidence_presence"] = {
         "implementation": _present(cr.get("Implementation plan")),
         "backout": _present(cr.get("Backout plan")),
@@ -82,18 +80,21 @@ def _compact_notes(value: str) -> str:
 
 
 def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
-    notes: dict[str, str] = {}
+    # Legacy fallback is retained, but newly generated training examples embed the
+    # actual Work Notes so the mapped corpus is self-contained.
+    fallback_notes: dict[str, str] = {}
     if notes_jsonl and notes_jsonl.exists():
         with notes_jsonl.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if line.strip():
                     row = json.loads(line)
-                    notes[str(row.get("cr_id"))] = str(row.get("notes") or "")
+                    fallback_notes[str(row.get("cr_id"))] = str(row.get("notes") or "")
 
     records: list[dict[str, Any]] = []
     distributions: defaultdict[str, Counter[str]] = defaultdict(Counter)
     field_requirements: defaultdict[str, Counter[str]] = defaultdict(Counter)
     note_phrases: Counter[str] = Counter()
+    embedded_notes = 0
 
     with train_jsonl.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -106,7 +107,11 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
             meta = example.get("metadata") or {}
             cr_id = str(meta.get("cr_id") or cr.get("Number") or "")
             key = "::".join(str(cr.get(k) or "Unknown") for k in ("Category", "Sub Category", "Change Class"))
+
+            # Historical outcomes remain aggregate context only; never attach the
+            # individual record's outcome to its historical reference card.
             distributions[key][str(target.get("prediction") or "UNSCORABLE")] += 1
+
             fr = context.get("field_requirements") or {}
             for gap in fr.get("gaps", [])[:12]:
                 if isinstance(gap, dict):
@@ -114,23 +119,41 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
             for signal in fr.get("note_signals", [])[:5]:
                 if isinstance(signal, dict) and signal.get("phrase"):
                     note_phrases[str(signal["phrase"])] += 1
+
+            embedded = str(context.get("work_notes") or "").strip()
+            work_notes = embedded if embedded else fallback_notes.get(cr_id, "")
+            if embedded:
+                embedded_notes += 1
+
             records.append({
                 "cr": _compact_cr(cr),
                 "requirements": _compact_requirements(fr),
-                "work_notes": _compact_notes(notes.get(cr_id, "")),
+                "work_notes": _compact_notes(work_notes),
+                "work_notes_present": bool(work_notes),
             })
 
     buckets = [
-        {"context": key, "records": sum(counts.values()), "outcomes": dict(counts), "common_requirement_gaps": field_requirements[key].most_common(6)}
+        {
+            "context": key,
+            "records": sum(counts.values()),
+            "outcomes": dict(counts),
+            "common_requirement_gaps": field_requirements[key].most_common(6),
+        }
         for key, counts in sorted(distributions.items(), key=lambda item: -sum(item[1].values()))
     ]
     return {
-        "version": 4,
+        "version": 5,
         "purpose": "full_mapped_training_corpus_as_compact_reference_without_per_record_prediction_leakage",
         "records_mapped": len(records),
+        "work_notes_embedded_records": embedded_notes,
         "context_buckets": buckets,
         "historical_note_phrases": note_phrases.most_common(40),
         "records": records,
+        "prediction_policy": {
+            "individual_historical_outcomes_hidden_from_reference_records": True,
+            "bucket_outcomes_are_aggregate_context_only": True,
+            "current_cr_prediction_must_be_derived_from_current_cr_evidence": True,
+        },
     }
 
 
@@ -143,7 +166,7 @@ def main() -> int:
     pack = build(args.train_jsonl, args.notes_jsonl)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(pack, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"Wrote {pack['records_mapped']} mapped records to {args.output}")
+    print(f"Wrote {pack['records_mapped']} mapped records to {args.output} ({pack['work_notes_embedded_records']} with embedded Work Notes)")
     return 0
 
 
