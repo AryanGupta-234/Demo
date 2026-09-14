@@ -9,7 +9,7 @@ from typing import Any
 
 from pre_cab.audit_store import SQLiteAuditStore
 from pre_cab.env_loader import load_dotenv
-from pre_cab.input_loader import load_cr_records, normalize_cr_record, source_id
+from pre_cab.input_loader import load_cr_records, normalize_cr_record, record_type, source_id
 from pre_cab.narrative import format_agent_chains, format_cab_result
 from pre_cab.pipeline import run_pre_cab
 from pre_cab.persistent_memory import SQLiteUnifiedMemory
@@ -26,11 +26,31 @@ def main() -> int:
     parser.add_argument("--provider", choices=["auto", "groq", "huggingface", "ollama"], default=None)
     parser.add_argument("--attachment-root", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/pre_cab"))
+    parser.add_argument(
+        "--include-emergency", action="store_true",
+        help="Also process Emergency-type changes (excluded by default - this system is scoped to Normal CAB review).",
+    )
     args = parser.parse_args()
 
     records = load_cr_records(args.cr_json)
     if not records:
         raise SystemExit("Input JSON contains no CR records")
+
+    # Default scope is Normal changes only: Emergency changes don't go through the
+    # CAB call this system supports, and scoring them against Normal-change field/
+    # historical patterns would be a category error, not a finding. Filtering here
+    # (main.py, the one-command entry point) closes a real gap: only batch.py's
+    # bulk path had this filter before, so pointing main.py directly at a raw
+    # export previously meant burning LLM calls (and CPU time) on out-of-scope
+    # records with no way to opt out short of pre-filtering the file yourself.
+    if not args.include_emergency:
+        before = len(records)
+        records = [r for r in records if record_type(r) != "emergency"]
+        excluded = before - len(records)
+        if excluded:
+            print(f"Excluded {excluded} Emergency-type record(s) (use --include-emergency to process them too).")
+    if not records:
+        raise SystemExit("No in-scope records to process after filtering (all were Emergency-type).")
 
     # GPT-OSS is the generative reasoning layer. V1 intentionally uses Groq first;
     # Hugging Face remains available as an explicit/automatic fallback. It is
