@@ -1,61 +1,96 @@
 # Adaptive Pre-CAB training
 
-This folder is the training side of the Pre-CAB brain. It is deliberately data-driven: it mines the historical export, builds compact model contexts, creates multi-task supervision, trains a GPT-OSS 20B QLoRA adapter on Kaggle, evaluates on a held-out split, and keeps a feedback buffer for future evolution.
+This folder builds the data/context side of the Pre-CAB brain. The workflow is deliberately data-driven: mine the historical export, keep only decision-relevant CR fields, map applicable requirements, include Work Notes as chronological auxiliary evidence, build a compact label-safe historical context pack, and then let the active Ollama model (`qwen2.5:7b-instruct`) reason over the mapped context. The prediction step remains separate from the historical reference records.
 
-## Important data rule
+## Data rule: Work Notes are evidence, not labels
 
-Raw Notes / Work Notes are included as a dedicated `notes` signal stream because they often contain valuable operational reasoning. They are **not automatically safe as decision-time labels**: comments can contain post-CAB outcomes or other leakage. The dataset builder therefore keeps notes in `notes_raw.jsonl` / `notes_signals.jsonl`, while the main decision-training records exclude known post-decision fields and mark note usage explicitly.
+Notes / Work Notes can contain valuable operational reasoning, including testing, rollback, approval, rework, incident, scheduling, or implementation updates. They can also contain post-decision information. Therefore:
+
+- actual Work Notes are embedded in every generated reasoning example under `work_notes`;
+- Work Notes are explicitly marked as chronological auxiliary evidence;
+- they must not silently overwrite the current CR field state;
+- they are never used as the training label;
+- known post-decision CR fields are excluded from the model-visible field map;
+- the historical context pack hides individual record outcomes and keeps only aggregate outcome distributions by context bucket.
 
 ## Files
 
-- `build_dataset.py` — normalizes the export, mines field usage/signals, includes Notes/Work Notes, creates train/validation/holdout JSONL, and writes a manifest.
-- `train_qlora.py` — Kaggle-ready Unsloth + TRL QLoRA training for GPT-OSS 20B.
-- `evaluate.py` — evaluates a saved adapter on the untouched holdout set and reports decision accuracy plus false-pass / false-fail rates when historical labels exist.
-- `evolve.py` — appends reviewed real-world feedback and creates a prioritized correction set for the next adapter version.
+- `build_dataset.py` — normalizes the export, mines field usage/signals, maps the optimized CR fields + requirements + actual Work Notes, and creates train/validation/holdout JSONL.
+- `build_context_pack.py` — turns the mapped training set into a compact, self-contained historical reference pack. It prefers embedded Work Notes and does not attach an individual historical outcome to its CR card.
+- `train_qlora.py` — Kaggle QLoRA training path for the experimental fine-tuning workflow.
+- `evaluate.py` — evaluates a saved adapter on the untouched holdout set.
+- `evolve.py` — appends reviewed real-world feedback for later model evolution.
 
-## Kaggle setup
-
-1. Upload your approved/de-identified CR export to Kaggle as a private dataset.
-2. Clone/download this repository or upload the `training/` directory.
-3. Run dataset preparation locally or in Kaggle:
+## Build the mapped dataset
 
 ```bash
 python training/build_dataset.py /kaggle/input/pre-cab-data/change.json --output-dir /kaggle/working/pre_cab_dataset
 ```
 
-4. Train:
+The generated reasoning examples contain:
 
-```bash
-python training/train_qlora.py --dataset-dir /kaggle/working/pre_cab_dataset --output-dir /kaggle/working/pre_cab_gptoss20b_v1
+```text
+current CR
+  ├─ optimized/high-signal fields
+  ├─ applicable field requirements
+  └─ actual chronological Work Notes
+
+        ↓
+
+specialist reasoning targets
+  ├─ technical
+  ├─ testing
+  ├─ risk
+  └─ CAB questions / recommendations
 ```
 
-5. Evaluate before promoting the adapter:
+For the historical reference context used by the reasoning brain:
 
 ```bash
-python training/evaluate.py --adapter /kaggle/working/pre_cab_gptoss20b_v1 --holdout /kaggle/working/pre_cab_dataset/holdout_reasoning.jsonl
+python training/build_context_pack.py \
+  /kaggle/working/pre_cab_dataset/train_reasoning.jsonl \
+  --notes-jsonl /kaggle/working/pre_cab_dataset/notes_raw.jsonl \
+  --output /kaggle/working/pre_cab_dataset/pre_cab_context_pack.json
 ```
 
-## Known limitation: field_requirements is not split-aware
+Then point the runtime at that pack:
 
-`field_requirement_context()` in `build_dataset.py` reuses `config/field_requirements.generated.json`,
-which was mined (by `scripts/mine_field_requirements.py`) from the *entire* real historical export in
-one pass - not separately re-mined per train/validation/holdout split. This is direct-leakage-safe (no
-individual record's own outcome field is ever exposed to itself), but it means a holdout record's text
-could have contributed, in aggregate, to the requirement-level statistics and work-note-signal lexicon it
-is later evaluated against. This is a second-order, aggregate-level effect, not a per-record label leak -
-but `evaluate.py`'s holdout accuracy should be read as mildly optimistic until the rule table is re-mined
-train-split-only for a rigorous benchmark run.
+```bash
+set PRE_CAB_TRAINING_CONTEXT=/kaggle/working/pre_cab_dataset/pre_cab_context_pack.json
+```
+
+For Ollama, the provider supports up to the configured model context. Set `OLLAMA_NUM_CTX` explicitly to match the context you intend to load; the adapter defaults to 32768 rather than forcing a large local memory allocation.
+
+## Prediction workflow
+
+The intended reasoning flow is:
+
+```text
+1. Current CR + mapped requirements + Work Notes
+                ↓
+2. Historical reference pack (label-safe per-record cards)
+                ↓
+3. Qwen analysis: facts, evidence, gaps, uncertainties, contradictions
+                ↓
+4. Prediction: PASS / CONDITIONAL / NOT_READY
+```
+
+Historical examples are reference material, not facts about the current CR. Individual historical predictions are never copied to the current CR. Aggregate bucket outcomes are context only; the current prediction must be derived from the current CR evidence.
+
+## Known limitation: field requirements are currently global
+
+`field_requirement_context()` in `build_dataset.py` reuses `config/field_requirements.generated.json`, which was mined from the entire real historical export rather than separately re-mined per train/validation/holdout split. This is not a direct per-record label leak, but it can make a holdout benchmark mildly optimistic until the requirement table is re-mined train-split-only.
 
 ## Learning / evolution design
 
-The training corpus intentionally has several tasks instead of one hard-coded classifier:
+The corpus intentionally contains several reasoning tasks instead of one hard-coded classifier:
 
-- field selection: learn which fields are informative for a CR context;
-- requirement semantics: learn REQUIRED / CONDITIONAL / RECOMMENDED / OPTIONAL / NOT_OBSERVED patterns;
-- notes analysis: learn useful operational signals from historical notes without leaking post-decision outcomes;
-- specialist reasoning: technical, testing, risk, impact, contradiction, and CAB-question patterns;
-- decision supervision: only where a historical CAB outcome can be normalized confidently.
+- field selection and context minimization;
+- requirement semantics;
+- Work Notes interpretation;
+- technical, testing, risk and impact reasoning;
+- contradiction detection;
+- CAB-question generation;
+- decision supervision where a historical CAB outcome can be normalized confidently.
 
-New reviewed outcomes are appended to `feedback.jsonl`. `evolve.py` prioritizes high-value mistakes, especially false PASS cases, so the next adapter version focuses on the failure modes that matter most.
-
-Never evaluate on records used to construct training examples, and never expose CAB outcome / closure fields to the prediction side of a historical example.
+Never evaluate on records used to construct training examples, and never expose CAB outcome / closure fields to the prediction side of an individual historical example.
