@@ -1,7 +1,7 @@
 """Structured reasoning brain for Pre-CAB analysis.
 
-The brain separates facts, inferences, uncertainties and recommendations. It builds a
-provider-neutral prompt payload for GPT-OSS 120B.
+The brain separates facts, inferences, uncertainties and recommendations and
+builds provider-neutral context for the active local reasoning model.
 """
 from __future__ import annotations
 
@@ -61,10 +61,10 @@ def build_reasoning_payload(
             for f in prior_findings
         ],
         "reasoning_contract": {
-            "facts": "directly observed from CR, memory, or evidence",
-            "inferences": "conclusions derived from facts",
+            "facts": "directly observed from the current CR, Work Notes, memory, or evidence",
+            "inferences": "conclusions derived from those facts",
             "uncertainties": "information that cannot be verified",
-            "contradictions": "claims conflicting with evidence or other fields",
+            "contradictions": "claims conflicting with evidence, Work Notes, or other fields",
             "recommendations": "actions that could move the CR toward readiness",
         },
     }
@@ -73,11 +73,11 @@ def build_reasoning_payload(
 def self_critique_questions() -> tuple[str, ...]:
     return (
         "What evidence would make the current conclusion wrong?",
-        "Which CR claims are unverified rather than proven?",
+        "Which CR or Work Note claims are unverified rather than proven?",
         "Did I assume UAT is required without a contextual reason?",
         "Did I accept a rollback statement without a credible recovery mechanism?",
         "Does a similar historical CR differ in any decision-relevant way?",
-        "Is there any contradiction between the CR and supporting evidence?",
+        "Is there any contradiction between the CR, Work Notes, and supporting evidence?",
         "What does the CAB reviewer still need to know or ask?",
     )
 
@@ -85,11 +85,16 @@ def self_critique_questions() -> tuple[str, ...]:
 def build_reasoning_system_prompt() -> str:
     return (
         "You are the reasoning brain of a Pre-CAB validator for Normal ServiceNow Change Requests. "
-        "Reason over structured CR facts, retrieved organizational memory, and evidence summaries. "
-        "Separate FACTS, INFERENCES, UNCERTAINTIES, CONTRADICTIONS and RECOMMENDATIONS. "
-        "UAT is contextual, not universal. A credible rollback/recovery mechanism may pass even when "
-        "its procedure is brief. Similar historical CRs may suggest reusable patterns, but every new "
-        "CR must be delta-validated. Never invent approvals, testing, evidence, CAB outcomes, or "
-        "policy requirements. Challenge your own initial conclusion before producing the final "
-        "recommendation. Include both a CAB-readable explanation and relevant technical reasoning."
+        "Reason over the current CR, its mapped requirements, chronological Work Notes, retrieved "
+        "organizational memory, and evidence summaries. Treat Work Notes as auxiliary chronological "
+        "evidence: they can reveal later status, testing, rollback, approval, scheduling, incident, "
+        "or rework information, but they are not automatically proof and must not silently overwrite "
+        "current field state. Separate FACTS, INFERENCES, UNCERTAINTIES, CONTRADICTIONS and "
+        "RECOMMENDATIONS. UAT is contextual, not universal. A credible rollback/recovery mechanism "
+        "may pass even when its procedure is brief. Similar historical CRs may suggest reusable "
+        "patterns, but every new CR must be delta-validated. Never invent approvals, testing, evidence, "
+        "CAB outcomes, or policy requirements. Historical reference records are context, not current-CR "
+        "facts, and individual historical outcomes must not be copied. Challenge false-PASS risk before "
+        "producing the final recommendation. Include both a CAB-readable explanation and relevant "
+        "technical reasoning."
     )
