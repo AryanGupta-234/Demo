@@ -1,10 +1,4 @@
-"""Build a compact, outcome-aware but prediction-safe historical context pack.
-
-All mapped training records can be represented in the pack without copying the
-141-column export. Work notes are included as a separate evidence channel.
-Per-record prediction labels are deliberately omitted; outcome distributions are
-kept only at historical context-bucket level.
-"""
+"""Build a compact, outcome-aware but prediction-safe historical context pack."""
 from __future__ import annotations
 
 import argparse
@@ -36,63 +30,55 @@ def _target(example: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _text(value: Any, limit: int) -> str:
-    return str(value or "").strip()[:limit]
+def _present(value: Any) -> bool:
+    return value not in (None, "", [], {}) and str(value).strip().lower() not in {"none", "null", "nan", "n/a", "na", "not applicable"}
 
 
 def _compact_cr(cr: dict[str, Any]) -> dict[str, Any]:
-    # This is intentionally a much smaller representation than the training
-    # example itself. It lets the full mapped corpus fit into a long-context
-    # window while preserving the fields needed to recognize change archetypes.
-    fields = {
-        "Number": 16,
-        "Type": 10,
-        "Short description": 90,
-        "Description": 120,
-        "Justification": 80,
-        "Implementation plan": 140,
-        "Backout plan": 100,
-        "Test plan": 100,
-        "Risk": 18,
-        "Risk and impact analysis": 100,
-        "Change Class": 35,
-        "Configuration item": 55,
-        "Environment": 18,
-        "Category": 30,
-        "Sub Category": 30,
-        "Conflict status": 20,
-    }
-    result: dict[str, Any] = {}
-    for field, limit in fields.items():
+    """Encode the mapped CR in a context-efficient card (~200-300 chars typical)."""
+    card: dict[str, Any] = {}
+    for field, limit in (
+        ("Number", 16), ("Short description", 90), ("Category", 24), ("Sub Category", 24),
+        ("Change Class", 24), ("Environment", 12), ("Risk", 12), ("Configuration item", 35),
+    ):
         value = cr.get(field)
-        if value in (None, "", [], {}):
-            continue
-        result[field] = _text(value, limit)
-    return result
+        if _present(value):
+            card[field] = str(value).strip()[:limit]
+    # Presence maps preserve the training field requirements without spending
+    # hundreds of tokens repeating long implementation/test narratives.
+    card["evidence_presence"] = {
+        "implementation": _present(cr.get("Implementation plan")),
+        "backout": _present(cr.get("Backout plan")),
+        "test_plan": _present(cr.get("Test plan")),
+        "risk_impact": _present(cr.get("Risk and impact analysis")),
+        "customer_approval": _present(cr.get("Customer Approval")),
+        "uat_signoff": _present(cr.get("UAT signoff")),
+        "test_results": _present(cr.get("Test Results Evidence")),
+        "lower_env": _present(cr.get("Lower Environment Reference CR/SR")),
+        "conflict": _present(cr.get("Conflict status")),
+    }
+    return card
 
 
 def _compact_requirements(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     gaps = []
-    for item in value.get("gaps", [])[:6]:
+    for item in value.get("gaps", [])[:8]:
         if isinstance(item, dict):
             gaps.append(f"{item.get('field')}:{item.get('requirement_level')}")
     notes = []
     for item in value.get("note_signals", [])[:4]:
         if isinstance(item, dict) and item.get("phrase"):
-            notes.append(_text(item.get("phrase"), 50))
+            notes.append(str(item["phrase"])[:45])
     return {"scope": value.get("resolved_scope"), "gaps": gaps, "note_signals": notes}
 
 
 def _compact_notes(value: str) -> str:
-    # Preserve the beginning and ending of the operational trail. The beginning
-    # often contains the initiating change rationale; the ending often contains
-    # the latest status/testing/rework information.
     value = str(value or "").strip()
-    if len(value) <= 220:
+    if len(value) <= 160:
         return value
-    return value[:120] + " ... " + value[-100:]
+    return value[:80] + " ... " + value[-75:]
 
 
 def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
@@ -120,9 +106,7 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
             meta = example.get("metadata") or {}
             cr_id = str(meta.get("cr_id") or cr.get("Number") or "")
             key = "::".join(str(cr.get(k) or "Unknown") for k in ("Category", "Sub Category", "Change Class"))
-
-            label = str(target.get("prediction") or "UNSCORABLE")
-            distributions[key][label] += 1
+            distributions[key][str(target.get("prediction") or "UNSCORABLE")] += 1
             fr = context.get("field_requirements") or {}
             for gap in fr.get("gaps", [])[:12]:
                 if isinstance(gap, dict):
@@ -130,7 +114,6 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
             for signal in fr.get("note_signals", [])[:5]:
                 if isinstance(signal, dict) and signal.get("phrase"):
                     note_phrases[str(signal["phrase"])] += 1
-
             records.append({
                 "cr": _compact_cr(cr),
                 "requirements": _compact_requirements(fr),
@@ -138,17 +121,11 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
             })
 
     buckets = [
-        {
-            "context": key,
-            "records": sum(counts.values()),
-            "outcomes": dict(counts),
-            "common_requirement_gaps": field_requirements[key].most_common(6),
-        }
+        {"context": key, "records": sum(counts.values()), "outcomes": dict(counts), "common_requirement_gaps": field_requirements[key].most_common(6)}
         for key, counts in sorted(distributions.items(), key=lambda item: -sum(item[1].values()))
     ]
-
     return {
-        "version": 3,
+        "version": 4,
         "purpose": "full_mapped_training_corpus_as_compact_reference_without_per_record_prediction_leakage",
         "records_mapped": len(records),
         "context_buckets": buckets,
