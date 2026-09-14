@@ -15,3 +15,5 @@ artifacts/
 real_data/
 private_data/
 src/*.egg-info/
+training/pre_cab_dataset/
+training/pre_cab_gptoss20b_v1/
