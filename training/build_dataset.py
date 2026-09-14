@@ -22,14 +22,8 @@ from pre_cab.benchmark_leakage import strip_post_decision_fields
 from pre_cab.field_requirement_engine import FieldRequirementEngine, RequirementLevel
 from pre_cab.rules import context_flags
 
-
-# Ordered REQUIRED -> CONDITIONAL -> OPTIONAL, per the real 2,013-record historical
-# export mined into config/field_requirements.generated.json (global bucket). Most
-# decision-relevant fields come first so a compact/truncated context still carries
-# the highest-value fields. "Change plan" is deliberately excluded: it is
-# NOT_OBSERVED (0.00 fill rate) across every real Normal CR in the dataset - this
-# org has never once used it, so it is pure noise to a model learning this org's
-# actual patterns, not this org's actual behavior.
+# Ordered REQUIRED -> CONDITIONAL -> OPTIONAL. Change plan is deliberately excluded:
+# it is NOT_OBSERVED (0.00 fill rate) across every real Normal CR in the dataset.
 DESCRIPTIVE_FIELDS = [
     "Short description", "Description", "Justification", "Implementation plan", "Priority",
     "Test plan", "Backout plan", "Risk", "Risk and impact analysis", "Change Class",
@@ -44,38 +38,26 @@ CONTEXT_FIELDS = [
     "Conflict status", "Planned start", "Planned end",
 ]
 NOTE_FIELDS = ["Comments and Work notes", "Work notes", "Notes"]
-
 NOTE_HEADER_RE = re.compile(r"\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2} - [^()]+?\([^)]*\)\s*", re.MULTILINE)
-
 FIELD_REQUIREMENT_ENGINE = FieldRequirementEngine()
 
 SYSTEM_PROMPT = (
-    "You are the Pre-CAB reasoning specialist for a real ServiceNow Change Advisory "
-    "Board pipeline. You are given: (1) the CR's own fields, selected because the "
-    "org's real historical data shows they carry decision-relevant signal, and (2) "
-    "field_requirements - a deterministic, data-mined verdict per field for this "
-    "CR's specific Category/Sub Category, already computed from real historical "
-    "fill/disposition rates. field_requirements is evidence, not a suggestion: "
-    "treat a REQUIRED-and-unsatisfied field as a real gap, and do not claim a field "
-    "is satisfied when its own entry says otherwise. Where field_requirements is "
-    "silent or its scope is 'global' (a category with little historical precedent), "
-    "say so as an uncertainty rather than guessing organizational policy.\n\n"
-    "Decision framework:\n"
-    "PASS - no blocking issues and sufficient confidence/evidence.\n"
+    "You are the Pre-CAB reasoning specialist for a real ServiceNow Change Advisory Board pipeline. "
+    "You are given (1) a compact set of CR fields selected from historical signal, (2) deterministic "
+    "field requirements for this CR's Category/Sub Category, and (3) chronological Work Notes when "
+    "available. Treat Work Notes as auxiliary evidence: they may contain useful status, testing, "
+    "approval, rollback, incident or rework claims, but they are not automatically proof and a later "
+    "note must not silently overwrite the current CR field state. Historical field requirements are "
+    "evidence, not organizational policy beyond their observed support.\n\n"
+    "Decision framework:\nPASS - no blocking issues and sufficient confidence/evidence.\n"
     "CONDITIONAL - no hard blocker, but specific unresolved items remain before approval.\n"
     "NOT_READY - a hard blocker, a major contradiction, or material missing mandatory evidence.\n\n"
-    "Rules: UAT is contextual, not universally mandatory - infer applicability from "
-    "the change type, do not assume every change needs it. A short rollback "
-    "description can still be credible; judge the mechanism, not the word count. "
-    "Never invent evidence, approvals, testing, or historical outcomes that are not "
-    "present in the given context. A contradiction (e.g. declared risk is low but "
-    "the impact narrative describes significant production/customer exposure) must "
-    "be surfaced explicitly, not smoothed over.\n\n"
-    "Respond with exactly these keys: facts, technical_reasoning, testing_reasoning, "
-    "risk_reasoning, uncertainties, contradictions, cab_questions, recommendations, "
-    "prediction. The four *_reasoning arrays are terse declarative bullet lines "
-    "(e.g. 'implementation is present', 'no direct contradiction'), matching this "
-    "system's existing deterministic agents so your output can sit alongside theirs."
+    "Rules: UAT is contextual, not universally mandatory. Judge rollback by recovery mechanism, not "
+    "word count. Never invent evidence, approvals, testing, historical outcomes, or policy. Distinguish "
+    "facts, inferences, uncertainties and contradictions. Work Notes never become the training label "
+    "and must never be used to copy a historical outcome into a new CR.\n\n"
+    "Respond with exactly these keys: facts, technical_reasoning, testing_reasoning, risk_reasoning, "
+    "uncertainties, contradictions, cab_questions, recommendations, prediction."
 )
 
 
@@ -90,8 +72,8 @@ def note_text(row: dict[str, Any]) -> str:
     for field in NOTE_FIELDS:
         value = row.get(field)
         if present(value):
-            parts.append(str(value))
-    return "\n".join(parts).strip()
+            parts.append(f"[{field}]\n{str(value).strip()}")
+    return "\n\n".join(parts).strip()
 
 
 def clean_note_text(value: str) -> str:
@@ -133,11 +115,6 @@ def select_fields(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
     for field in CONTEXT_FIELDS:
         if present(row.get(field)):
             selected[field] = row.get(field)
-    # Defense in depth: the allowlists above are the primary leakage control, but
-    # if a post-decision field (CAB Outcome, State, Close notes, Approval history,
-    # ...) is ever accidentally added to one of them later, this still keeps it
-    # out of the model-visible context rather than relying solely on the allowlist
-    # having been written correctly.
     return strip_post_decision_fields(selected)
 
 
@@ -170,12 +147,8 @@ def note_signals(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def technical_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
-    """Reuse the real, production TechnicalAgent so the fine-tuned model learns to
-    mimic exactly what the deterministic system already produces, rather than a
-    second, slightly-different reimplementation drifting out of sync over time."""
     from pre_cab.agents import TechnicalAgent
     from pre_cab.schemas import AgentContext
-
     result = TechnicalAgent().run(AgentContext(cr=row))
     chain = result.notes.get("chain", [])
     uncertainties = [f"technical uncertainty: {result.notes.get('technical_uncertainty', 'unknown')}"]
@@ -185,7 +158,6 @@ def technical_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
 def testing_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
     from pre_cab.agents import TestingAgent
     from pre_cab.schemas import AgentContext
-
     result = TestingAgent().run(AgentContext(cr=row))
     chain = result.notes.get("chain", [])
     uncertainties = [] if result.notes.get("functional_coverage_ok") else ["functional test coverage is not fully confirmed"]
@@ -195,24 +167,13 @@ def testing_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
 def risk_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
     from pre_cab.agents import RiskAgent
     from pre_cab.schemas import AgentContext
-
     result = RiskAgent().run(AgentContext(cr=row))
     chain = result.notes.get("chain", [])
-    contradictions = (
-        [f"declared risk ({row.get('Risk') or 'unknown'}) conflicts with the described impact"]
-        if result.notes.get("contradiction") else []
-    )
+    contradictions = ([f"declared risk ({row.get('Risk') or 'unknown'}) conflicts with the described impact"] if result.notes.get("contradiction") else [])
     return chain, contradictions
 
 
 def field_requirement_context(row: dict[str, Any]) -> dict[str, Any]:
-    """The exact same data-mined per-category verdicts the production decision
-    gate uses (see field_requirement_engine.py) - this is the primary answer to
-    "only feed the model the fields that actually matter": rather than a flat
-    field dump, the model sees which fields THIS org's real history says are
-    REQUIRED/CONDITIONAL/OPTIONAL for THIS CR's specific Category/Sub Category,
-    with the real support counts behind each verdict.
-    """
     report = FIELD_REQUIREMENT_ENGINE.evaluate(row)
     return {
         "resolved_scope": report.resolved_scope,
@@ -221,28 +182,27 @@ def field_requirement_context(row: dict[str, Any]) -> dict[str, Any]:
             for f in report.findings
             if not f.satisfied and f.requirement_level in (RequirementLevel.REQUIRED, RequirementLevel.CONDITIONAL)
         ],
-        "note_signals": [
-            {"phrase": s.phrase, "evidence": s.evidence} for s in report.note_signals
-        ],
+        "note_signals": [{"phrase": s.phrase, "evidence": s.evidence} for s in report.note_signals],
     }
 
 
-def _cab_questions(fr_context: dict[str, Any], test_uncertainties: list[str]) -> list[str]:
+def _cab_questions(fr_context: dict[str, Any], test_uncertainties: list[str], notes: str) -> list[str]:
     questions: list[str] = []
     if test_uncertainties:
-        questions.append("What functional scenarios were tested?")
+        questions.append("What functional scenarios were tested and what execution evidence supports the claim?")
     if fr_context["gaps"]:
-        gap = fr_context["gaps"][0]["field"]
-        questions.append(f"Can {gap} be confirmed or explicitly justified as not applicable?")
-    if fr_context["note_signals"]:
-        questions.append("Do this CR's work notes indicate it may be withdrawn or reworked?")
-    return questions[:4] or ["Are there any residual concerns not captured in the CR fields?"]
+        questions.append(f"Can {fr_context['gaps'][0]['field']} be confirmed or explicitly justified as not applicable?")
+    if notes:
+        questions.append("Do the chronological Work Notes contain any newer status, rework, approval, or rollback information that should be reconciled with the current CR fields?")
+    return questions[:4] or ["Are there any residual concerns not captured in the CR fields or Work Notes?"]
 
 
-def _recommendations(fr_context: dict[str, Any]) -> list[str]:
+def _recommendations(fr_context: dict[str, Any], notes: str) -> list[str]:
     recs = [f"Populate or justify {gap['field']} before CAB review." for gap in fr_context["gaps"][:3]]
+    if notes:
+        recs.append("Reconcile any material Work Note claims with the current CR fields before approval.")
     recs.append("Confirm final CAB evidence before approval.")
-    return recs
+    return recs[:4]
 
 
 def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -252,7 +212,6 @@ def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
     tech_reasoning, tech_uncertainties = technical_chain(row)
     test_reasoning, test_uncertainties = testing_chain(row)
     risk_reasoning, risk_contradictions = risk_chain(row)
-
     target = {
         "facts": [f"{k} is populated" for k, v in selected.items() if present(v)],
         "technical_reasoning": tech_reasoning,
@@ -260,8 +219,8 @@ def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
         "risk_reasoning": risk_reasoning,
         "uncertainties": tech_uncertainties + test_uncertainties,
         "contradictions": risk_contradictions,
-        "cab_questions": _cab_questions(fr_context, test_uncertainties),
-        "recommendations": _recommendations(fr_context),
+        "cab_questions": _cab_questions(fr_context, test_uncertainties, notes),
+        "recommendations": _recommendations(fr_context, notes),
     }
     label = outcome(row)
     if label is not None:
@@ -270,9 +229,13 @@ def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
         "task": "PRE_CAB_ANALYSIS",
         "cr": selected,
         "field_requirements": fr_context,
-        "note_signal": {
-            "available": bool(notes),
-            "note_fields_present": [f for f in NOTE_FIELDS if present(row.get(f))],
+        "work_notes": notes,
+        "work_note_policy": {
+            "role": "chronological auxiliary evidence",
+            "use_for_context": True,
+            "do_not_use_as_label": True,
+            "do_not_silently_overwrite_current_fields": True,
+            "distinguish_claims_from_verified_evidence": True,
         },
     }
     return {
@@ -285,6 +248,7 @@ def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
             "cr_id": source_id(row),
             "historical_outcome": label.value if label else None,
             "has_notes": bool(notes),
+            "notes_chars": len(notes),
             "selected_field_count": len(selected),
         },
     }
@@ -299,11 +263,7 @@ def split_rows(rows: list[dict[str, Any]], seed: int) -> tuple[list, list, list]
     n = len(keys)
     a = int(n * 0.70)
     b = a + int(n * 0.15)
-    return (
-        [r for k in keys[:a] for r in ids[k]],
-        [r for k in keys[a:b] for r in ids[k]],
-        [r for k in keys[b:] for r in ids[k]],
-    )
+    return ([r for k in keys[:a] for r in ids[k]], [r for k in keys[a:b] for r in ids[k]], [r for k in keys[b:] for r in ids[k]])
 
 
 def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -318,47 +278,36 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("training/output"))
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
-
     rows = [normalize_cr_record(r) for r in load_cr_records(args.input)]
     normal = [r for r in rows if record_type(r) == "normal"]
     train_rows, valid_rows, holdout_rows = split_rows(normal, args.seed)
     profiles = selection_profile(train_rows)
-
     out = args.output_dir
     out.mkdir(parents=True, exist_ok=True)
-
     for name, subset in (("train", train_rows), ("validation", valid_rows), ("holdout", holdout_rows)):
         examples = [build_example(row, profiles) for row in subset]
         write_jsonl(out / f"{name}_reasoning.jsonl", examples)
-
     raw_notes = []
     for row in normal:
         notes = note_text(row)
         if notes:
             raw_notes.append({"cr_id": source_id(row), "notes": notes})
     write_jsonl(out / "notes_raw.jsonl", raw_notes)
-
-    # Note-derived signals are stored separately and never used as decision labels.
     (out / "notes_signals.json").write_text(json.dumps(note_signals(train_rows), indent=2, ensure_ascii=False), encoding="utf-8")
     (out / "field_profile.json").write_text(json.dumps(profiles, indent=2, ensure_ascii=False), encoding="utf-8")
-
     digest = hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()[:16]
     manifest = {
         "dataset_version": f"pre-cab-{digest}",
-        "source_records": len(rows),
-        "normal_records": len(normal),
-        "train_records": len(train_rows),
-        "validation_records": len(valid_rows),
-        "holdout_records": len(holdout_rows),
+        "source_records": len(rows), "normal_records": len(normal),
+        "train_records": len(train_rows), "validation_records": len(valid_rows), "holdout_records": len(holdout_rows),
         "train_examples": len(train_rows),
         "historical_outcome_counts": dict(Counter((outcome(r).value if outcome(r) else "UNSCORABLE") for r in normal)),
-        "notes_records": len(raw_notes),
-        "note_fields": NOTE_FIELDS,
+        "notes_records": len(raw_notes), "note_fields": NOTE_FIELDS,
+        "notes_embedded_in_training_messages": True,
         "seed": args.seed,
-        "leakage_policy": "known post-decision fields and raw notes are excluded from decision labels; notes are retained as a separate auxiliary signal stream",
+        "leakage_policy": "post-decision fields are excluded from model-visible CR fields; Work Notes are included as auxiliary chronological evidence and are never used as decision labels",
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-
     print(json.dumps(manifest, indent=2, ensure_ascii=False))
     return 0
 
