@@ -7,6 +7,16 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+DESCRIPTIVE_FIELDS = (
+    "Short description", "Description", "Justification", "Implementation plan",
+    "Change plan", "Backout plan", "Work notes", "Comments", "Test plan",
+    "Configuration item", "Risk", "Priority",
+)
+SIGNOFF_FIELDS = (
+    "UAT signoff", "Customer Approval", "TCS QA signoff",
+    "Test Results Evidence", "Lower Environment Reference CR/SR",
+)
+
 
 def _user_context(example: dict[str, Any]) -> dict[str, Any]:
     for message in example.get("messages") or []:
@@ -31,29 +41,32 @@ def _target(example: dict[str, Any]) -> dict[str, Any]:
 
 
 def _present(value: Any) -> bool:
-    return value not in (None, "", [], {}) and str(value).strip().lower() not in {"none", "null", "nan", "n/a", "na", "not applicable"}
+    return value not in (None, "", [], {}) and str(value).strip().lower() not in {"none", "null", "nan"}
+
+
+def _compact(value: Any, limit: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit // 2] + " ... " + text[-(limit // 2) :]
 
 
 def _compact_cr(cr: dict[str, Any]) -> dict[str, Any]:
-    """Encode the mapped CR in a context-efficient card (~200-300 chars typical)."""
+    """Keep all mapped field presence while retaining useful text for historical retrieval."""
     card: dict[str, Any] = {}
     for field, limit in (
-        ("Number", 16), ("Short description", 90), ("Category", 24), ("Sub Category", 24),
-        ("Change Class", 24), ("Environment", 12), ("Risk", 12), ("Configuration item", 35),
+        ("Number", 16), ("Short description", 120), ("Description", 500), ("Justification", 350),
+        ("Implementation plan", 600), ("Change plan", 350), ("Backout plan", 500), ("Test plan", 500),
+        ("Configuration item", 50), ("Risk", 30), ("Priority", 30), ("Category", 40),
+        ("Sub Category", 40), ("Change Class", 40), ("Environment", 20), ("Conflict status", 30),
     ):
-        value = cr.get(field)
-        if _present(value):
-            card[field] = str(value).strip()[:limit]
-    card["evidence_presence"] = {
-        "implementation": _present(cr.get("Implementation plan")),
-        "backout": _present(cr.get("Backout plan")),
-        "test_plan": _present(cr.get("Test plan")),
-        "risk_impact": _present(cr.get("Risk and impact analysis")),
-        "customer_approval": _present(cr.get("Customer Approval")),
-        "uat_signoff": _present(cr.get("UAT signoff")),
-        "test_results": _present(cr.get("Test Results Evidence")),
-        "lower_env": _present(cr.get("Lower Environment Reference CR/SR")),
-        "conflict": _present(cr.get("Conflict status")),
+        if field in cr:
+            value = cr.get(field)
+            card[field] = _compact(value, limit) if value is not None else None
+    card["descriptive_field_presence"] = {field: _present(cr.get(field)) for field in DESCRIPTIVE_FIELDS}
+    card["signoff_dispositions"] = {
+        field: str(cr.get(field)).strip() if _present(cr.get(field)) else None
+        for field in SIGNOFF_FIELDS
     }
     return card
 
@@ -62,39 +75,36 @@ def _compact_requirements(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     gaps = []
-    for item in value.get("gaps", [])[:8]:
+    for item in value.get("gaps", [])[:12]:
         if isinstance(item, dict):
             gaps.append(f"{item.get('field')}:{item.get('requirement_level')}")
     notes = []
-    for item in value.get("note_signals", [])[:4]:
+    for item in value.get("note_signals", [])[:6]:
         if isinstance(item, dict) and item.get("phrase"):
-            notes.append(str(item["phrase"])[:45])
+            notes.append(str(item["phrase"])[:60])
     return {"scope": value.get("resolved_scope"), "gaps": gaps, "note_signals": notes}
 
 
-def _compact_notes(value: str) -> str:
-    value = str(value or "").strip()
-    if len(value) <= 160:
-        return value
-    return value[:80] + " ... " + value[-75:]
+def _compact_notes(value: str, limit: int = 800) -> str:
+    return _compact(value, limit)
 
 
 def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
-    # Legacy fallback is retained, but newly generated training examples embed the
-    # actual Work Notes so the mapped corpus is self-contained.
-    fallback_notes: dict[str, str] = {}
+    fallback: dict[str, dict[str, str]] = {}
     if notes_jsonl and notes_jsonl.exists():
         with notes_jsonl.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if line.strip():
                     row = json.loads(line)
-                    fallback_notes[str(row.get("cr_id"))] = str(row.get("notes") or "")
+                    fallback[str(row.get("cr_id"))] = {
+                        key: str(value or "") for key, value in row.items() if key != "cr_id"
+                    }
 
     records: list[dict[str, Any]] = []
     distributions: defaultdict[str, Counter[str]] = defaultdict(Counter)
     field_requirements: defaultdict[str, Counter[str]] = defaultdict(Counter)
     note_phrases: Counter[str] = Counter()
-    embedded_notes = 0
+    embedded_journals = 0
 
     with train_jsonl.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -108,28 +118,35 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
             cr_id = str(meta.get("cr_id") or cr.get("Number") or "")
             key = "::".join(str(cr.get(k) or "Unknown") for k in ("Category", "Sub Category", "Change Class"))
 
-            # Historical outcomes remain aggregate context only; never attach the
-            # individual record's outcome to its historical reference card.
             distributions[key][str(target.get("prediction") or "UNSCORABLE")] += 1
-
             fr = context.get("field_requirements") or {}
             for gap in fr.get("gaps", [])[:12]:
                 if isinstance(gap, dict):
                     field_requirements[key][f"{gap.get('field')}={gap.get('requirement_level')}"] += 1
-            for signal in fr.get("note_signals", [])[:5]:
+            for signal in fr.get("note_signals", [])[:6]:
                 if isinstance(signal, dict) and signal.get("phrase"):
                     note_phrases[str(signal["phrase"])] += 1
 
-            embedded = str(context.get("work_notes") or "").strip()
-            work_notes = embedded if embedded else fallback_notes.get(cr_id, "")
-            if embedded:
-                embedded_notes += 1
+            work_notes = str(context.get("work_notes") or "").strip()
+            comments = str(context.get("comments") or "").strip()
+            legacy = str(context.get("legacy_comments_and_work_notes") or "").strip()
+            fallback_row = fallback.get(cr_id, {})
+            if not work_notes:
+                work_notes = fallback_row.get("Work notes", "")
+            if not comments:
+                comments = fallback_row.get("Comments", "")
+            if not legacy:
+                legacy = fallback_row.get("Comments and Work notes", "")
+            if work_notes or comments or legacy:
+                embedded_journals += 1
 
             records.append({
                 "cr": _compact_cr(cr),
                 "requirements": _compact_requirements(fr),
                 "work_notes": _compact_notes(work_notes),
-                "work_notes_present": bool(work_notes),
+                "comments": _compact_notes(comments),
+                "legacy_comments_and_work_notes": _compact_notes(legacy),
+                "journal_present": bool(work_notes or comments or legacy),
             })
 
     buckets = [
@@ -142,10 +159,15 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
         for key, counts in sorted(distributions.items(), key=lambda item: -sum(item[1].values()))
     ]
     return {
-        "version": 5,
+        "version": 6,
         "purpose": "full_mapped_training_corpus_as_compact_reference_without_per_record_prediction_leakage",
+        "schema": {
+            "descriptive_fields": list(DESCRIPTIVE_FIELDS),
+            "signoff_fields": list(SIGNOFF_FIELDS),
+            "work_notes_and_comments_are_per_cr": True,
+        },
         "records_mapped": len(records),
-        "work_notes_embedded_records": embedded_notes,
+        "journal_embedded_records": embedded_journals,
         "context_buckets": buckets,
         "historical_note_phrases": note_phrases.most_common(40),
         "records": records,
@@ -153,6 +175,7 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
             "individual_historical_outcomes_hidden_from_reference_records": True,
             "bucket_outcomes_are_aggregate_context_only": True,
             "current_cr_prediction_must_be_derived_from_current_cr_evidence": True,
+            "work_notes_and_comments_never_become_labels": True,
         },
     }
 
@@ -166,7 +189,7 @@ def main() -> int:
     pack = build(args.train_jsonl, args.notes_jsonl)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(pack, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"Wrote {pack['records_mapped']} mapped records to {args.output} ({pack['work_notes_embedded_records']} with embedded Work Notes)")
+    print(f"Wrote {pack['records_mapped']} mapped records to {args.output} ({pack['journal_embedded_records']} with CR journal context)")
     return 0
 
 
