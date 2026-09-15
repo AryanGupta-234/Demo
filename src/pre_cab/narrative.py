@@ -20,9 +20,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from .schemas import Decision
+from .schemas import Decision, FindingSeverity
 
 _NOT_APPLICABLE_VALUES = {"", "na", "n/a", "none", "not applicable"}
+
+# Finding codes already represented by a dedicated checklist line below (by name,
+# risk section, or the UAT section) -- anything BLOCKING/WARNING NOT in this set
+# gets its own checklist line too, so the checklist can never look all-green
+# while a real WARNING/BLOCKING finding is quietly driving the decision to
+# CONDITIONAL/NOT_READY. That mismatch (all ✅ but CONDITIONAL, with the real
+# reason only visible in Recommendations) is exactly the kind of thing that
+# makes an evidence-grounded tool look untrustworthy on inspection.
+_CHECKLIST_REPRESENTED_CODES = {
+    "MISSING_CONFIGURATION_ITEM", "MISSING_IMPLEMENTATION_PLAN", "BACKOUT_OK", "BACKOUT_WEAK",
+    "MISSING_TEST_PLAN", "MISSING_CUSTOMER_APPROVAL", "CUSTOMER_APPROVAL_GAP", "CUSTOMER_APPROVAL_PRESENT",
+    "UAT_CONTEXT", "UAT_NOT_MANDATORY",
+}
 
 # Agents rendered as a reasoning chain, in display order, with a display name.
 _CHAIN_AGENTS = [
@@ -59,7 +72,9 @@ def _mark(ok: bool) -> str:
     return "✅" if ok else "❌"
 
 
-def _checklist(cr: dict[str, Any], agent_results: list[Any], top_clone: dict[str, Any] | None) -> list[str]:
+def _checklist(
+    cr: dict[str, Any], agent_results: list[Any], top_clone: dict[str, Any] | None, findings: list[Any]
+) -> list[str]:
     by_name = {result.agent: result for result in agent_results}
     technical = by_name.get("technical")
     testing = by_name.get("testing")
@@ -94,7 +109,26 @@ def _checklist(cr: dict[str, Any], agent_results: list[Any], top_clone: dict[str
         historical_ok = str(top_clone["historical_decision"]).strip().lower() == "approved"
         items.append((historical_ok, f"Historical CAB pattern = {top_clone['historical_decision']}"))
 
-    return [f"{_mark(ok)} {label}" for ok, label in items]
+    lines = [f"{_mark(ok)} {label}" for ok, label in items]
+
+    # Anything else that's actually WARNING/BLOCKING and drove the decision, but
+    # isn't one of the curated checks above, gets its own line rather than
+    # staying invisible. Deduped by finding code so this list only grows once
+    # per distinct concern.
+    seen_codes: set[str] = set()
+    for finding in findings:
+        code = getattr(finding, "code", "")
+        severity = getattr(finding, "severity", None)
+        if code in _CHECKLIST_REPRESENTED_CODES or code in seen_codes:
+            continue
+        if severity == FindingSeverity.BLOCKING:
+            lines.append(f"❌ {getattr(finding, 'title', code)}")
+            seen_codes.add(code)
+        elif severity == FindingSeverity.WARNING:
+            lines.append(f"⚠️ {getattr(finding, 'title', code)}")
+            seen_codes.add(code)
+
+    return lines
 
 
 def _cab_questions(cr: dict[str, Any], agent_results: list[Any], brain_payload: dict[str, Any] | None) -> list[str]:
@@ -116,13 +150,28 @@ def _cab_questions(cr: dict[str, Any], agent_results: list[Any], brain_payload: 
     return questions[:4]
 
 
-def _recommendations(cr: dict[str, Any], findings: list[Any]) -> list[str]:
-    seen: list[str] = []
+def _recommendations(cr: dict[str, Any], findings: list[Any], brain_payload: dict[str, Any] | None = None) -> list[str]:
+    # Deterministic recommendations are real and grounded (tied to an actual
+    # finding), but generic ("Populate X before CAB review"). The model's own
+    # recommendations, when available, are CR-specific but not independently
+    # verified. Show both rather than one replacing the other - dropping the
+    # grounded ones in favor of the model's would trade validity for polish.
+    deterministic: list[str] = []
     for finding in findings:
         rec = getattr(finding, "recommendation", "") or ""
-        if rec and rec not in seen:
-            seen.append(rec)
-    recommendations = seen[:3]
+        if rec and rec not in deterministic:
+            deterministic.append(rec)
+    deterministic = deterministic[:3]
+
+    model_recs: list[str] = []
+    if brain_payload and isinstance(brain_payload.get("recommendations"), list):
+        for rec in brain_payload["recommendations"]:
+            text = str(rec)
+            if text and text not in deterministic and text not in model_recs:
+                model_recs.append(text)
+    model_recs = model_recs[:2]
+
+    recommendations = deterministic + model_recs
     recommendations.append("Confirm final CAB evidence before approval.")
     return recommendations
 
@@ -157,7 +206,7 @@ def format_cab_result(
         f"Confidence: {confidence:.0%}",
         "",
     ]
-    lines.extend(_checklist(cr, agent_results, top_clone))
+    lines.extend(_checklist(cr, agent_results, top_clone, findings))
 
     lines.append("")
     lines.append("UAT:")
@@ -196,7 +245,7 @@ def format_cab_result(
 
     lines.append("")
     lines.append("Recommendation:")
-    for rec in _recommendations(cr, findings):
+    for rec in _recommendations(cr, findings, brain_payload):
         lines.append(f"   → {rec}")
 
     return "\n".join(lines)
