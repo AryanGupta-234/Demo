@@ -20,44 +20,61 @@ from pre_cab.cab_outcomes import normalize_cab_recommendation
 from pre_cab.input_loader import load_cr_records, normalize_cr_record, record_type, source_id
 from pre_cab.benchmark_leakage import strip_post_decision_fields
 from pre_cab.field_requirement_engine import FieldRequirementEngine, RequirementLevel
-from pre_cab.rules import context_flags
 
-# Ordered REQUIRED -> CONDITIONAL -> OPTIONAL. Change plan is deliberately excluded:
-# it is NOT_OBSERVED (0.00 fill rate) across every real Normal CR in the dataset.
+
+# Exact model-facing descriptive field set requested for the CR understanding stage.
+# Unlike signoffs, these are represented by both value and presence so absence itself
+# remains observable to the model. Change plan is retained even when historically sparse.
 DESCRIPTIVE_FIELDS = [
-    "Short description", "Description", "Justification", "Implementation plan", "Priority",
-    "Test plan", "Backout plan", "Risk", "Risk and impact analysis", "Change Class",
-    "Configuration item", "Environment",
+    "Short description",
+    "Description",
+    "Justification",
+    "Implementation plan",
+    "Change plan",
+    "Backout plan",
+    "Work notes",
+    "Comments",
+    "Test plan",
+    "Configuration item",
+    "Risk",
+    "Priority",
 ]
 SIGNOFF_FIELDS = [
-    "Customer Approval", "Test Results Evidence", "UAT signoff",
-    "TCS QA signoff", "Lower Environment Reference CR/SR",
+    "UAT signoff",
+    "Customer Approval",
+    "TCS QA signoff",
+    "Test Results Evidence",
+    "Lower Environment Reference CR/SR",
 ]
 CONTEXT_FIELDS = [
     "Number", "Type", "Category", "Sub Category",
-    "Conflict status", "Planned start", "Planned end",
+    "Conflict status", "Planned start", "Planned end", "Change Class", "Environment",
 ]
-NOTE_FIELDS = ["Comments and Work notes", "Work notes", "Notes"]
+
+# Some ServiceNow exports expose a combined journal column. Preserve it distinctly
+# rather than pretending it is a clean Comments-only field. The canonical Work notes
+# and Comments fields win when they are present.
+LEGACY_COMBINED_NOTES_FIELD = "Comments and Work notes"
+NOTE_COMPAT_FIELDS = ("Work notes", "Comments", LEGACY_COMBINED_NOTES_FIELD, "Notes")
 NOTE_HEADER_RE = re.compile(r"\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2} - [^()]+?\([^)]*\)\s*", re.MULTILINE)
 FIELD_REQUIREMENT_ENGINE = FieldRequirementEngine()
 
 SYSTEM_PROMPT = (
-    "You are the Pre-CAB reasoning specialist for a real ServiceNow Change Advisory Board pipeline. "
-    "You are given (1) a compact set of CR fields selected from historical signal, (2) deterministic "
-    "field requirements for this CR's Category/Sub Category, and (3) chronological Work Notes when "
-    "available. Treat Work Notes as auxiliary evidence: they may contain useful status, testing, "
-    "approval, rollback, incident or rework claims, but they are not automatically proof and a later "
-    "note must not silently overwrite the current CR field state. Historical field requirements are "
-    "evidence, not organizational policy beyond their observed support.\n\n"
-    "Decision framework:\nPASS - no blocking issues and sufficient confidence/evidence.\n"
-    "CONDITIONAL - no hard blocker, but specific unresolved items remain before approval.\n"
-    "NOT_READY - a hard blocker, a major contradiction, or material missing mandatory evidence.\n\n"
-    "Rules: UAT is contextual, not universally mandatory. Judge rollback by recovery mechanism, not "
-    "word count. Never invent evidence, approvals, testing, historical outcomes, or policy. Distinguish "
-    "facts, inferences, uncertainties and contradictions. Work Notes never become the training label "
-    "and must never be used to copy a historical outcome into a new CR.\n\n"
-    "Respond with exactly these keys: facts, technical_reasoning, testing_reasoning, risk_reasoning, "
-    "uncertainties, contradictions, cab_questions, recommendations, prediction."
+    "You are the Pre-CAB CR analysis specialist. First understand the CR and map its "
+    "requirements before making any CAB prediction. The input contains an optimized, "
+    "fixed descriptive field set, disposition-aware signoff fields, contextual fields, "
+    "and the actual Work Notes/Comments belonging to this same CR when available.\n\n"
+    "Descriptive fields are evaluated by value and presence; Change plan is retained in "
+    "the schema even when historical fill is low. Signoff fields must be interpreted by "
+    "their disposition (Yes/No/Not Applicable/etc.), not merely by non-empty status.\n\n"
+    "Work Notes are chronological auxiliary evidence from this CR. Use them to identify "
+    "status, testing, approval, rollback, incident, rework, or other operational claims, "
+    "but do not silently overwrite current field state. Comments are separate from Work "
+    "Notes. If only the legacy combined journal field exists, identify that limitation.\n\n"
+    "Requirements are deterministic historical signals for this CR's Category/Sub Category, "
+    "not absolute policy truth. UAT is contextual. Never invent evidence, approvals, testing, "
+    "historical outcomes, or requirements. First produce grounded analysis; CAB prediction "
+    "is a separate later step."
 )
 
 
@@ -67,12 +84,36 @@ def present(value: Any) -> bool:
     return str(value).strip().lower() not in {"none", "null", "nan", "n/a", "na", "not applicable"}
 
 
+def raw_present(value: Any) -> bool:
+    """Presence for descriptive mapping: retain explicit N/A-like values as values."""
+    return value is not None and value != "" and value != [] and value != {}
+
+
+def _canonical_notes(row: dict[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for field in ("Work notes", "Comments"):
+        value = row.get(field)
+        if raw_present(value):
+            result[field] = str(value).strip()
+    combined = row.get(LEGACY_COMBINED_NOTES_FIELD)
+    if raw_present(combined):
+        result[LEGACY_COMBINED_NOTES_FIELD] = str(combined).strip()
+    notes = row.get("Notes")
+    if raw_present(notes):
+        result["Notes"] = str(notes).strip()
+    return result
+
+
 def note_text(row: dict[str, Any]) -> str:
     parts: list[str] = []
-    for field in NOTE_FIELDS:
-        value = row.get(field)
-        if present(value):
-            parts.append(f"[{field}]\n{str(value).strip()}")
+    notes = _canonical_notes(row)
+    for field in ("Work notes", "Comments"):
+        if field in notes:
+            parts.append(f"[{field}]\n{notes[field]}")
+    if LEGACY_COMBINED_NOTES_FIELD in notes:
+        parts.append(f"[{LEGACY_COMBINED_NOTES_FIELD}]\n{notes[LEGACY_COMBINED_NOTES_FIELD]}")
+    if "Notes" in notes:
+        parts.append(f"[Notes]\n{notes['Notes']}")
     return "\n\n".join(parts).strip()
 
 
@@ -105,17 +146,29 @@ def selection_profile(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 def select_fields(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> dict[str, Any]:
     selected: dict[str, Any] = {}
+    # Keep every requested descriptive field in the schema. This makes field presence
+    # learnable and prevents a missing field from being indistinguishable from omission.
     for field in DESCRIPTIVE_FIELDS:
-        value = row.get(field)
-        if present(value) and profiles.get(field, {}).get("learned_role") != "NOT_OBSERVED":
-            selected[field] = value
+        selected[field] = row.get(field) if raw_present(row.get(field)) else None
     for field in SIGNOFF_FIELDS:
-        if present(row.get(field)):
-            selected[field] = row.get(field)
+        value = row.get(field)
+        selected[field] = value if raw_present(value) else None
     for field in CONTEXT_FIELDS:
-        if present(row.get(field)):
-            selected[field] = row.get(field)
+        value = row.get(field)
+        if raw_present(value):
+            selected[field] = value
     return strip_post_decision_fields(selected)
+
+
+def descriptive_presence(row: dict[str, Any]) -> dict[str, bool]:
+    return {field: raw_present(row.get(field)) for field in DESCRIPTIVE_FIELDS}
+
+
+def signoff_dispositions(row: dict[str, Any]) -> dict[str, str | None]:
+    return {
+        field: str(row.get(field)).strip() if raw_present(row.get(field)) else None
+        for field in SIGNOFF_FIELDS
+    }
 
 
 def outcome(row: dict[str, Any]):
@@ -150,27 +203,23 @@ def technical_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
     from pre_cab.agents import TechnicalAgent
     from pre_cab.schemas import AgentContext
     result = TechnicalAgent().run(AgentContext(cr=row))
-    chain = result.notes.get("chain", [])
-    uncertainties = [f"technical uncertainty: {result.notes.get('technical_uncertainty', 'unknown')}"]
-    return chain, uncertainties
+    return result.notes.get("chain", []), [f"technical uncertainty: {result.notes.get('technical_uncertainty', 'unknown')}"]
 
 
 def testing_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
     from pre_cab.agents import TestingAgent
     from pre_cab.schemas import AgentContext
     result = TestingAgent().run(AgentContext(cr=row))
-    chain = result.notes.get("chain", [])
     uncertainties = [] if result.notes.get("functional_coverage_ok") else ["functional test coverage is not fully confirmed"]
-    return chain, uncertainties
+    return result.notes.get("chain", []), uncertainties
 
 
 def risk_chain(row: dict[str, Any]) -> tuple[list[str], list[str]]:
     from pre_cab.agents import RiskAgent
     from pre_cab.schemas import AgentContext
     result = RiskAgent().run(AgentContext(cr=row))
-    chain = result.notes.get("chain", [])
-    contradictions = ([f"declared risk ({row.get('Risk') or 'unknown'}) conflicts with the described impact"] if result.notes.get("contradiction") else [])
-    return chain, contradictions
+    contradictions = [f"declared risk ({row.get('Risk') or 'unknown'}) conflicts with the described impact"] if result.notes.get("contradiction") else []
+    return result.notes.get("chain", []), contradictions
 
 
 def field_requirement_context(row: dict[str, Any]) -> dict[str, Any]:
@@ -193,14 +242,14 @@ def _cab_questions(fr_context: dict[str, Any], test_uncertainties: list[str], no
     if fr_context["gaps"]:
         questions.append(f"Can {fr_context['gaps'][0]['field']} be confirmed or explicitly justified as not applicable?")
     if notes:
-        questions.append("Do the chronological Work Notes contain any newer status, rework, approval, or rollback information that should be reconciled with the current CR fields?")
-    return questions[:4] or ["Are there any residual concerns not captured in the CR fields or Work Notes?"]
+        questions.append("Do the chronological Work Notes or Comments contain newer status, rework, approval, or rollback information that should be reconciled with the current CR fields?")
+    return questions[:4] or ["Are there any residual concerns not captured in the CR fields, Work Notes, or Comments?"]
 
 
 def _recommendations(fr_context: dict[str, Any], notes: str) -> list[str]:
     recs = [f"Populate or justify {gap['field']} before CAB review." for gap in fr_context["gaps"][:3]]
     if notes:
-        recs.append("Reconcile any material Work Note claims with the current CR fields before approval.")
+        recs.append("Reconcile any material Work Note or Comment claims with the current CR fields before approval.")
     recs.append("Confirm final CAB evidence before approval.")
     return recs[:4]
 
@@ -212,8 +261,11 @@ def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
     tech_reasoning, tech_uncertainties = technical_chain(row)
     test_reasoning, test_uncertainties = testing_chain(row)
     risk_reasoning, risk_contradictions = risk_chain(row)
+
     target = {
-        "facts": [f"{k} is populated" for k, v in selected.items() if present(v)],
+        "facts": [f"{k} is {'present' if raw_present(v) else 'missing'}" for k, v in selected.items() if k in DESCRIPTIVE_FIELDS],
+        "descriptive_field_presence": descriptive_presence(row),
+        "signoff_dispositions": signoff_dispositions(row),
         "technical_reasoning": tech_reasoning,
         "testing_reasoning": test_reasoning,
         "risk_reasoning": risk_reasoning,
@@ -225,18 +277,30 @@ def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
     label = outcome(row)
     if label is not None:
         target["prediction"] = label.value
+
+    canonical_notes = _canonical_notes(row)
     user_context = {
-        "task": "PRE_CAB_ANALYSIS",
+        "task": "PRE_CAB_CR_UNDERSTANDING",
         "cr": selected,
         "field_requirements": fr_context,
-        "work_notes": notes,
-        "work_note_policy": {
+        "descriptive_fields": DESCRIPTIVE_FIELDS,
+        "signoff_fields": SIGNOFF_FIELDS,
+        "context_fields": CONTEXT_FIELDS,
+        "descriptive_field_presence": descriptive_presence(row),
+        "signoff_dispositions": signoff_dispositions(row),
+        "work_notes": canonical_notes.get("Work notes"),
+        "comments": canonical_notes.get("Comments"),
+        "legacy_comments_and_work_notes": canonical_notes.get(LEGACY_COMBINED_NOTES_FIELD),
+        "other_notes": canonical_notes.get("Notes"),
+        "work_notes_policy": {
+            "same_cr_only": True,
             "role": "chronological auxiliary evidence",
             "use_for_context": True,
             "do_not_use_as_label": True,
             "do_not_silently_overwrite_current_fields": True,
             "distinguish_claims_from_verified_evidence": True,
         },
+        "prediction_stage": "LATER_SEPARATE_STEP",
     }
     return {
         "messages": [
@@ -247,9 +311,13 @@ def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
         "metadata": {
             "cr_id": source_id(row),
             "historical_outcome": label.value if label else None,
-            "has_notes": bool(notes),
-            "notes_chars": len(notes),
+            "has_work_notes": bool(canonical_notes.get("Work notes")),
+            "has_comments": bool(canonical_notes.get("Comments")),
+            "has_legacy_combined_journal": bool(canonical_notes.get(LEGACY_COMBINED_NOTES_FIELD)),
+            "notes_chars": len(note_text(row)),
             "selected_field_count": len(selected),
+            "descriptive_field_count": len(DESCRIPTIVE_FIELDS),
+            "signoff_field_count": len(SIGNOFF_FIELDS),
         },
     }
 
@@ -278,34 +346,45 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("training/output"))
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
+
     rows = [normalize_cr_record(r) for r in load_cr_records(args.input)]
     normal = [r for r in rows if record_type(r) == "normal"]
     train_rows, valid_rows, holdout_rows = split_rows(normal, args.seed)
     profiles = selection_profile(train_rows)
+
     out = args.output_dir
     out.mkdir(parents=True, exist_ok=True)
     for name, subset in (("train", train_rows), ("validation", valid_rows), ("holdout", holdout_rows)):
-        examples = [build_example(row, profiles) for row in subset]
-        write_jsonl(out / f"{name}_reasoning.jsonl", examples)
+        write_jsonl(out / f"{name}_reasoning.jsonl", [build_example(row, profiles) for row in subset])
+
     raw_notes = []
     for row in normal:
-        notes = note_text(row)
-        if notes:
-            raw_notes.append({"cr_id": source_id(row), "notes": notes})
+        canonical = _canonical_notes(row)
+        if canonical:
+            raw_notes.append({"cr_id": source_id(row), **canonical})
     write_jsonl(out / "notes_raw.jsonl", raw_notes)
     (out / "notes_signals.json").write_text(json.dumps(note_signals(train_rows), indent=2, ensure_ascii=False), encoding="utf-8")
     (out / "field_profile.json").write_text(json.dumps(profiles, indent=2, ensure_ascii=False), encoding="utf-8")
+
     digest = hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()[:16]
     manifest = {
         "dataset_version": f"pre-cab-{digest}",
-        "source_records": len(rows), "normal_records": len(normal),
-        "train_records": len(train_rows), "validation_records": len(valid_rows), "holdout_records": len(holdout_rows),
+        "source_records": len(rows),
+        "normal_records": len(normal),
+        "train_records": len(train_rows),
+        "validation_records": len(valid_rows),
+        "holdout_records": len(holdout_rows),
         "train_examples": len(train_rows),
         "historical_outcome_counts": dict(Counter((outcome(r).value if outcome(r) else "UNSCORABLE") for r in normal)),
-        "notes_records": len(raw_notes), "note_fields": NOTE_FIELDS,
+        "notes_records": len(raw_notes),
+        "note_fields": NOTE_COMPAT_FIELDS,
+        "descriptive_fields": DESCRIPTIVE_FIELDS,
+        "signoff_fields": SIGNOFF_FIELDS,
+        "context_fields": CONTEXT_FIELDS,
         "notes_embedded_in_training_messages": True,
+        "prediction_stage": "later_separate_step",
         "seed": args.seed,
-        "leakage_policy": "post-decision fields are excluded from model-visible CR fields; Work Notes are included as auxiliary chronological evidence and are never used as decision labels",
+        "leakage_policy": "post-decision fields are excluded from model-visible CR fields; Work Notes and Comments belong to the same CR and are included as auxiliary chronological evidence, never as decision labels",
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(manifest, indent=2, ensure_ascii=False))
