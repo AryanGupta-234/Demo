@@ -2,7 +2,8 @@
 
 This is an application-level learning pass: Qwen reads historical CR examples and
 summarizes patterns into a reusable JSON artifact. It does NOT update model weights.
-The artifact is consumed by scripts/predict_qwen.py during the prediction pass.
+For leakage-safe evaluation, this script uses the training split by default; validation
+and holdout splits are opt-in only.
 """
 from __future__ import annotations
 
@@ -139,15 +140,8 @@ def _load_many(paths: list[Path]) -> list[dict[str, Any]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Learn organization-specific Pre-CAB patterns with local Qwen via Ollama")
     parser.add_argument(
-        "--input",
-        type=Path,
-        nargs="+",
-        default=[
-            Path("training/output/train_reasoning.jsonl"),
-            Path("training/output/validation_reasoning.jsonl"),
-            Path("training/output/holdout_reasoning.jsonl"),
-        ],
-        help="One or more generated training JSONL files; default uses all three mapped splits.",
+        "--input", type=Path, nargs="+", default=[Path("training/output/train_reasoning.jsonl")],
+        help="One or more generated mapped JSONL files. Default: training split only. Add validation/holdout explicitly only for exploratory learning.",
     )
     parser.add_argument("--output", type=Path, default=Path("training/output/qwen_learning.json"))
     parser.add_argument("--chunk-size", type=int, default=20)
@@ -232,6 +226,7 @@ def main() -> int:
             "historical_labels_used_during_learning": True,
             "future_prediction_must_not_treat_historical_labels_as_current_evidence": True,
             "work_notes_and_comments_are_same_cr_journal_context": True,
+            "evaluation_policy": "train_split_only_by_default",
         },
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
