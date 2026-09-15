@@ -262,9 +262,17 @@ def build_example(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> d
     test_reasoning, test_uncertainties = testing_chain(row)
     risk_reasoning, risk_contradictions = risk_chain(row)
 
+    # NOTE: `facts` must be derived from the raw row's descriptive presence, not from
+    # `selected`. `selected` has already had post-decision fields stripped out via
+    # strip_post_decision_fields(), which also removes "Work notes" (it is a
+    # POST_DECISION_FIELDS member used for leakage control on other pipelines). Deriving
+    # `facts` from `selected` silently mislabels "Work notes is missing" even when Work
+    # Notes are present and provided separately below -- a contradictory supervision
+    # signal that actively teaches the model a false fact template.
+    field_presence = descriptive_presence(row)
     target = {
-        "facts": [f"{k} is {'present' if raw_present(v) else 'missing'}" for k, v in selected.items() if k in DESCRIPTIVE_FIELDS],
-        "descriptive_field_presence": descriptive_presence(row),
+        "facts": [f"{field} is {'present' if is_present else 'missing'}" for field, is_present in field_presence.items()],
+        "descriptive_field_presence": field_presence,
         "signoff_dispositions": signoff_dispositions(row),
         "technical_reasoning": tech_reasoning,
         "testing_reasoning": test_reasoning,
