@@ -110,7 +110,13 @@ class AgenticReasoningLoop:
             "cab_reasoning": "plain-language CAB decision rationale",
             "cab_questions": "array of up to 4 useful CAB questions",
             "recommendations": "array of up to 4 concrete next actions",
-            "self_critique": "array of concise checks used to challenge the conclusion",
+            "self_critique": (
+                "array of your own ANSWERS to the self_critique_questions above, stated as findings "
+                "(e.g. 'UAT was required because the change is customer-facing, not assumed', or "
+                "'the rollback statement lacks a credible recovery mechanism and should not be trusted'). "
+                "Do not repeat the questions themselves - if a question doesn't change your conclusion, "
+                "say so briefly rather than restating it unanswered."
+            ),
         }
         payload["instruction"] = (
             "Return ONLY one valid JSON object. First map applicable requirements to evidence, then reason about readiness. "

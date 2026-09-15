@@ -62,6 +62,39 @@ def test_reasoning_loop_can_run_independent_dual_pass():
     assert result.mode == "dual"
 
 
+def test_self_critique_instruction_tells_model_to_answer_not_repeat():
+    # Regression: a real Ollama (qwen2.5:7b) run showed self_critique output
+    # that was just the input self_critique_questions echoed back verbatim
+    # ("Did I assume UAT is required without a contextual reason?" as-is,
+    # not answered) - the output_contract instruction was ambiguous enough
+    # that a smaller model defaulted to parroting the questions.
+    captured = {}
+
+    @dataclass
+    class CapturingModel:
+        model_name: str = "test-model"
+
+        def generate(self, *, system, user, temperature=0.1, response_format=None, reasoning_effort="high"):
+            captured["user"] = json.loads(user)
+            payload = {
+                "prediction": "PASS", "confidence": 0.9, "facts": [], "inferences": [],
+                "uncertainties": [], "contradictions": [], "technical_reasoning": "x",
+                "cab_reasoning": "x", "cab_questions": [], "recommendations": [],
+                "self_critique": ["answered"],
+            }
+            return ModelResponse(text=json.dumps(payload), model=self.model_name, raw={})
+
+    brain = AgenticReasoningLoop(CapturingModel(), InMemoryUnifiedMemory(), mode="single")
+    brain.run(AgentContext(cr={"Number": "CHG-DEMO-001"}, strictness=Strictness.BALANCED))
+
+    instruction = captured["user"]["output_contract"]["self_critique"]
+    questions = captured["user"]["self_critique_questions"]
+    assert "answer" in instruction.lower()
+    assert "do not repeat" in instruction.lower() or "not the questions" in instruction.lower()
+    # the instruction text itself must not just be the question list restated
+    assert instruction != questions
+
+
 def test_report_keeps_cab_and_technical_views():
     finding = Finding(
         code="EXAMPLE",
