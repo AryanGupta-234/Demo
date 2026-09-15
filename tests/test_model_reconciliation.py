@@ -72,3 +72,21 @@ def test_router_uses_second_provider() -> None:
     assert router.last_attempts[0].ok is False
     assert router.last_attempts[1].ok is True
     assert response.raw["pre_cab_router"]["attempts"][0]["ok"] is False
+
+
+def test_final_reasoning_metadata_is_not_stale_after_run_pre_cab() -> None:
+    # Regression: run_pre_cab's stage1 is internally run with model=None (to
+    # control free-tier usage), so metadata["model"]/["reasoning_mode"] were
+    # left at their model-less values (None / "none") even after the real
+    # final-reasoning pass ran successfully and populated metadata["brain"]
+    # with real model output - self-contradictory metadata that made it look
+    # like no model ran when one clearly did.
+    from pre_cab.pipeline import run_pre_cab
+
+    cr = _good_cr()
+    result = run_pre_cab(cr, model=StaticProvider("PASS"))
+    meta = result.stage1.metadata
+    assert meta["brain"]  # the model did run and produced output
+    assert meta["model"] == "test-gpt-oss-120b"
+    assert meta["reasoning_mode"] != "none"
+    assert meta["model_prediction"] == "PASS"

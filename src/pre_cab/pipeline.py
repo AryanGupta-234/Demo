@@ -119,6 +119,19 @@ def run_pre_cab(
 
     stage1_result.stage1.metadata.update(
         {
+            # NOTE: stage1 (run_stage1, above/earlier) is deliberately run with
+            # model=None to control free-tier usage - its own "model"/
+            # "model_prediction"/"model_error"/"reasoning_mode" metadata fields
+            # reflect that model-less run and would otherwise sit here stale and
+            # misleading (showing None/"none" even though the model demonstrably
+            # ran and produced "brain" below) once this final reasoning pass
+            # actually happens. Refresh them here so metadata.model=None never
+            # coexists with a populated metadata.brain - anyone reading this
+            # dict should see one consistent story, not two eras mixed together.
+            "model": getattr(model, "model_name", None),
+            "model_prediction": reasoning.model_prediction.value if reasoning.model_prediction else None,
+            "model_error": reasoning.error,
+            "reasoning_mode": reasoning.reasoning.mode if reasoning.reasoning else "none",
             "final_reasoning_model": getattr(model, "model_name", None),
             "final_model_prediction": reasoning.model_prediction.value if reasoning.model_prediction else None,
             "final_reasoning_error": reasoning.error,
