@@ -35,7 +35,10 @@ def main() -> int:
     if not args.knowledge.exists():
         raise SystemExit(f"Learned knowledge not found: {args.knowledge}. Run training/learn_qwen.py first.")
 
+    # brain_loop accepts both names for backwards compatibility; set both so the
+    # learned artifact is guaranteed to reach the reasoning payload.
     os.environ["PRE_CAB_LEARNED_KNOWLEDGE"] = str(args.knowledge)
+    os.environ["PRE_CAB_TRAINING_CONTEXT"] = str(args.knowledge)
     os.environ["PRE_CAB_REASONING_MODE"] = args.mode
 
     records = load_cr_records(args.input)
