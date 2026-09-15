@@ -1,13 +1,15 @@
 """Leakage-control policy for historical Pre-CAB benchmarking.
 
 The historical ServiceNow export contains fields that are populated only after execution,
-closure, or CAB review. Those fields must not be visible to the model during prediction.
+closure, or CAB review. Those fields must not be visible to a leakage-sensitive benchmark.
+The explicit learning pipeline may opt into same-CR Work Notes/Comments because they are part
+of the user's requested historical learning corpus; those journals must then be treated as
+auxiliary chronological evidence, never as labels.
 """
 from __future__ import annotations
 
 from typing import Any, Iterable
 
-# Conservative deny-list: when in doubt, keep a field out of the historical benchmark input.
 POST_DECISION_FIELDS: frozenset[str] = frozenset(
     {
         "CAB Outcome",
@@ -39,10 +41,17 @@ POST_DECISION_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+JOURNAL_FIELDS: frozenset[str] = frozenset({"Work notes", "Comments", "Comments and Work notes", "Notes"})
 
-def strip_post_decision_fields(record: dict[str, Any]) -> dict[str, Any]:
-    """Return only fields considered safe as model-visible historical input."""
-    return {key: value for key, value in record.items() if key not in POST_DECISION_FIELDS}
+
+def strip_post_decision_fields(
+    record: dict[str, Any],
+    *,
+    include_journals: bool = False,
+) -> dict[str, Any]:
+    """Remove post-decision fields; optionally preserve same-CR journal fields for learning."""
+    blocked = POST_DECISION_FIELDS - JOURNAL_FIELDS if include_journals else POST_DECISION_FIELDS
+    return {key: value for key, value in record.items() if key not in blocked}
 
 
 def leakage_report(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
