@@ -56,7 +56,8 @@ def _compact_cr(cr: dict[str, Any]) -> dict[str, Any]:
     card: dict[str, Any] = {}
     for field, limit in (
         ("Number", 16), ("Short description", 120), ("Description", 500), ("Justification", 350),
-        ("Implementation plan", 600), ("Change plan", 350), ("Backout plan", 500), ("Test plan", 500),
+        ("Implementation plan", 600), ("Change plan", 350), ("Backout plan", 500),
+        ("Work notes", 700), ("Comments", 700), ("Test plan", 500),
         ("Configuration item", 50), ("Risk", 30), ("Priority", 30), ("Category", 40),
         ("Sub Category", 40), ("Change Class", 40), ("Environment", 20), ("Conflict status", 30),
     ):
@@ -90,6 +91,12 @@ def _compact_notes(value: str, limit: int = 800) -> str:
 
 
 def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
+    if train_jsonl.suffix.lower() != ".jsonl":
+        raise ValueError(
+            f"Expected a JSONL training file, not {train_jsonl}. "
+            "Run build_dataset.py first, then pass training/output/train_reasoning.jsonl."
+        )
+
     fallback: dict[str, dict[str, str]] = {}
     if notes_jsonl and notes_jsonl.exists():
         with notes_jsonl.open("r", encoding="utf-8") as handle:
@@ -107,10 +114,16 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
     embedded_journals = 0
 
     with train_jsonl.open("r", encoding="utf-8") as handle:
-        for line in handle:
+        for line_number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
-            example = json.loads(line)
+            try:
+                example = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"Invalid JSONL in {train_jsonl} at line {line_number}. "
+                    "Pass training/output/train_reasoning.jsonl, not the original source JSON."
+                ) from exc
             context = _user_context(example)
             target = _target(example)
             cr = context.get("cr") if isinstance(context.get("cr"), dict) else {}
@@ -159,7 +172,7 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
         for key, counts in sorted(distributions.items(), key=lambda item: -sum(item[1].values()))
     ]
     return {
-        "version": 6,
+        "version": 7,
         "purpose": "full_mapped_training_corpus_as_compact_reference_without_per_record_prediction_leakage",
         "schema": {
             "descriptive_fields": list(DESCRIPTIVE_FIELDS),
@@ -182,11 +195,25 @@ def build(train_jsonl: Path, notes_jsonl: Path | None) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build compact full-corpus context for the Ollama reasoning brain")
-    parser.add_argument("train_jsonl", type=Path)
-    parser.add_argument("--notes-jsonl", type=Path, default=None)
+    parser.add_argument(
+        "train_jsonl",
+        type=Path,
+        nargs="?",
+        default=Path("training/output/train_reasoning.jsonl"),
+        help="Generated training JSONL (default: training/output/train_reasoning.jsonl)",
+    )
+    parser.add_argument(
+        "--notes-jsonl",
+        type=Path,
+        default=Path("training/output/notes_raw.jsonl"),
+        help="Per-CR journal fallback JSONL (default: training/output/notes_raw.jsonl)",
+    )
     parser.add_argument("--output", type=Path, default=Path("training/output/pre_cab_context_pack.json"))
     args = parser.parse_args()
-    pack = build(args.train_jsonl, args.notes_jsonl)
+    try:
+        pack = build(args.train_jsonl, args.notes_jsonl)
+    except ValueError as exc:
+        parser.error(str(exc))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(pack, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"Wrote {pack['records_mapped']} mapped records to {args.output} ({pack['journal_embedded_records']} with CR journal context)")
