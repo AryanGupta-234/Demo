@@ -125,7 +125,7 @@ def _decision_summary(
     if brain_payload:
         model_summary = _text(brain_payload.get("executive_summary"))
         if model_summary:
-            return model_summary, []
+            return f"AI synthesis: {model_summary}", []
 
     blocking = [f for f in findings if getattr(f, "severity", None) == FindingSeverity.BLOCKING]
     warnings = [f for f in findings if getattr(f, "severity", None) == FindingSeverity.WARNING]
@@ -168,11 +168,10 @@ def _evidence_snapshot(cr: dict[str, Any]) -> list[str]:
         ("Risk", cr.get("Risk")),
         ("Priority", cr.get("Priority")),
     ]
-    lines = []
-    for label, value in rows:
-        state = "PRESENT" if _is_meaningful(value) else "MISSING/UNSET"
-        lines.append(f"{label:<21} {state:<12} {_excerpt(value)}")
-    return lines
+    return [
+        f"{label:<21} {'PRESENT' if _is_meaningful(value) else 'MISSING/UNSET':<12} {_excerpt(value)}"
+        for label, value in rows
+    ]
 
 
 def _signoff_snapshot(cr: dict[str, Any]) -> list[str]:
@@ -315,6 +314,7 @@ def format_cab_result(
     technical = by_name.get("technical")
     if technical:
         n = technical.notes
+        dependency_evidence = bool(_is_meaningful(cr.get("Test Results Evidence")) or _is_meaningful(cr.get("Lower Environment Reference CR/SR")))
         lines.extend([
             f"Implementation: {_mark(bool(_is_meaningful(cr.get('Implementation plan'))))}",
             f"  Evidence: {_excerpt(cr.get('Implementation plan'), 260)}",
@@ -322,7 +322,7 @@ def format_cab_result(
             f"  Value: {_text(cr.get('Configuration item')) or 'Not identified'}",
             f"Rollback/recovery: {_mark(bool(n.get('rollback_aligned')))}",
             f"  Assessment: {_excerpt(n.get('rollback_reason') or cr.get('Backout plan'), 260)}",
-            f"Dependency/lower-environment evidence: {_mark(bool(n.get('rollback_aligned') and (cr.get('Test Results Evidence') or cr.get('Lower Environment Reference CR/SR'))))}",
+            f"Dependency/lower-environment evidence: {_mark(dependency_evidence)}",
             f"Technical uncertainty: {_text(n.get('technical_uncertainty')).upper() or 'UNKNOWN'}",
         ])
     else:
