@@ -117,9 +117,38 @@ def _training_view(example: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _load_many(paths: list[Path]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in paths:
+        for example in _load_examples(path):
+            user, _ = _messages(example)
+            cr = user.get("cr") if isinstance(user.get("cr"), dict) else {}
+            metadata = example.get("metadata") or {}
+            key = str(metadata.get("cr_id") or cr.get("Number") or "")
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            rows.append(example)
+    if not rows:
+        raise ValueError("No examples found in the supplied JSONL files")
+    return rows
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Learn organization-specific Pre-CAB patterns with local Qwen via Ollama")
-    parser.add_argument("--input", type=Path, default=Path("training/output/train_reasoning.jsonl"))
+    parser.add_argument(
+        "--input",
+        type=Path,
+        nargs="+",
+        default=[
+            Path("training/output/train_reasoning.jsonl"),
+            Path("training/output/validation_reasoning.jsonl"),
+            Path("training/output/holdout_reasoning.jsonl"),
+        ],
+        help="One or more generated training JSONL files; default uses all three mapped splits.",
+    )
     parser.add_argument("--output", type=Path, default=Path("training/output/qwen_learning.json"))
     parser.add_argument("--chunk-size", type=int, default=20)
     parser.add_argument("--limit", type=int, default=0, help="0 = all records")
@@ -128,7 +157,7 @@ def main() -> int:
     if args.chunk_size < 1:
         raise SystemExit("--chunk-size must be >= 1")
 
-    examples = [_training_view(e) for e in _load_examples(args.input)]
+    examples = [_training_view(e) for e in _load_many(args.input)]
     if args.limit:
         examples = examples[: args.limit]
 
@@ -199,7 +228,7 @@ def main() -> int:
         "chunk_count": len(chunk_summaries),
         "knowledge": synthesis,
         "source": {
-            "input": str(args.input),
+            "input": [str(path) for path in args.input],
             "historical_labels_used_during_learning": True,
             "future_prediction_must_not_treat_historical_labels_as_current_evidence": True,
             "work_notes_and_comments_are_same_cr_journal_context": True,
