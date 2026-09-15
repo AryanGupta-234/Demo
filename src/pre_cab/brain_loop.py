@@ -44,7 +44,7 @@ class ReasoningLoopResult:
 
 
 class AgenticReasoningLoop:
-    """Reason over the mapped CR, its own Work Notes/Comments, requirements and history."""
+    """Reason over the mapped CR, its own Work Notes/Comments, requirements and learned history."""
 
     def __init__(self, model: ModelProvider, memory: UnifiedMemory | None = None, limit: int = 12, mode: str | None = None) -> None:
         self.model = model
@@ -88,7 +88,21 @@ class AgenticReasoningLoop:
         return value
 
     @staticmethod
-    def _historical_context() -> dict[str, Any] | None:
+    def _load_json_artifact(env_name: str) -> dict[str, Any] | None:
+        raw = os.getenv(env_name, "").strip()
+        if not raw:
+            return None
+        path = Path(raw)
+        if not path.exists():
+            return {"status": "missing", "path": str(path)}
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else {"status": "invalid", "path": str(path)}
+        except Exception as exc:
+            return {"status": "unreadable", "path": str(path), "error": f"{type(exc).__name__}: {exc}"}
+
+    @classmethod
+    def _historical_context(cls) -> dict[str, Any] | None:
         raw = os.getenv("PRE_CAB_TRAINING_CONTEXT", "").strip()
         if not raw:
             return None
@@ -100,6 +114,10 @@ class AgenticReasoningLoop:
             return value if isinstance(value, dict) else {"status": "invalid", "path": str(path)}
         except Exception as exc:
             return {"status": "unreadable", "path": str(path), "error": f"{type(exc).__name__}: {exc}"}
+
+    @staticmethod
+    def _learned_knowledge() -> dict[str, Any] | None:
+        return AgenticReasoningLoop._load_json_artifact("PRE_CAB_LEARNED_KNOWLEDGE")
 
     @staticmethod
     def _compact_historical_context(value: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -125,9 +143,6 @@ class AgenticReasoningLoop:
     def _build_payload(self, context: AgentContext, findings: list[Finding] | None) -> dict[str, Any]:
         base = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
         selected_cr = dict(base)
-        # Always expose the explicit CR schema requested by the training mapper.
-        # This prevents the field-agent's historical sparsity filter from dropping
-        # a field whose presence/absence is itself useful to Qwen.
         selected_cr.update(self._mapped_cr(context.cr))
         for field in _REQUIREMENT_CONTEXT_FIELDS:
             if field in context.cr and context.cr.get(field) not in (None, "", [], {}):
@@ -156,6 +171,20 @@ class AgenticReasoningLoop:
         payload["retrieved_memory"] = compact_memory(list(payload.get("retrieved_memory") or []), limit=8)
         payload["prior_findings"] = compact_findings(list(payload.get("prior_findings") or []), limit=18)
         payload["strictness"] = context.strictness.value
+
+        learned = self._learned_knowledge()
+        if learned is not None:
+            knowledge = learned.get("knowledge") if isinstance(learned.get("knowledge"), dict) else learned
+            payload["learned_organization_knowledge"] = knowledge
+            payload["learned_knowledge_policy"] = {
+                "source": "historical_learning_stage",
+                "status": "prior_knowledge_only",
+                "historical_labels_used_to_build_it": True,
+                "do_not_treat_as_current_cr_evidence": True,
+                "do_not_copy_a_historical_outcome": True,
+                "delta_validate_against_current_cr": True,
+            }
+
         historical = self._compact_historical_context(self._historical_context())
         if historical is not None:
             payload["historical_training_context"] = historical
@@ -188,15 +217,14 @@ class AgenticReasoningLoop:
             "self_critique": "array of concise answers used to challenge the conclusion",
         }
         payload["instruction"] = (
-            "Return ONLY one valid JSON object. First map the fixed CR schema to applicable requirements and evidence, "
-            "then reason about readiness. Use all supplied descriptive fields, including explicit missing/present state. "
-            "Interpret signoff fields by their disposition (Yes, No, Not Applicable, Completed, etc.), not merely whether "
-            "they are populated. Work Notes and Comments are chronological journal evidence from this SAME CR; use them "
-            "when relevant, but never let a later journal entry silently overwrite current structured fields. If the legacy "
-            "combined journal field is supplied, keep that limitation explicit. Historical context is reference material, "
-            "not current-CR evidence; identify patterns and delta-check them. Never copy a historical prediction. UAT is "
-            "contextual. Rollback must be a credible recovery mechanism. Never invent approvals, testing, evidence, history, "
-            "or policy. Separate facts, inferences, uncertainties and contradictions, and challenge false-PASS risk."
+            "Return ONLY one valid JSON object. Analyze the current CR first using the fixed schema, mapped requirements, "
+            "Work Notes, Comments, retrieved evidence and learned organization knowledge. The learned knowledge was derived "
+            "from historical CRs and is prior knowledge, not current-CR evidence. Historical labels were used only during the "
+            "learning pass and must not be copied to the current CR. Use all descriptive fields, including explicit missing/"
+            "present state. Interpret signoff fields by disposition (Yes, No, Not Applicable, Completed, etc.). Work Notes and "
+            "Comments are chronological journal evidence from this SAME CR. Never let a later journal entry silently overwrite "
+            "current structured fields. UAT is contextual. Rollback must be credible. Never invent approvals, testing, evidence, "
+            "history, or policy. Separate facts, inferences, uncertainties and contradictions and challenge false-PASS risk."
         )
         return payload
 
