@@ -137,7 +137,16 @@ def main() -> int:
     parser.add_argument("--grad-accumulation", type=int, default=8)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
-    parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument(
+        "--lora-dropout",
+        type=float,
+        default=0.0,
+        help="Unsloth's fast, memory-efficient LoRA kernel path requires dropout=0. Any nonzero value "
+        "falls back to the slower unpatched implementation ('Unsloth will patch all other layers, except "
+        "LoRA matrices, causing a performance hit'), which also uses meaningfully more activation memory -- "
+        "on a single 15GB T4 at max_seq_length=4096 this is enough to trigger a CUDA OOM a few steps in. "
+        "Regularize via early stopping / weight decay / fewer epochs instead if this dataset is small.",
+    )
     parser.add_argument("--early-stopping-patience", type=int, default=2)
     parser.add_argument("--seed", type=int, default=3407)
     args = parser.parse_args()

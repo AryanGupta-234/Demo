@@ -159,8 +159,13 @@ def main() -> int:
                          help="Stock base model name instead of --adapter, for the un-fine-tuned comparison run.")
     parser.add_argument("--holdout", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=5)
-    parser.add_argument("--max-new-tokens", type=int, default=384)
-    parser.add_argument("--max-seq-length", type=int, default=2048)
+    parser.add_argument("--max-new-tokens", type=int, default=768,
+                         help="384 was too tight: the un-fine-tuned stock model in particular tends to "
+                         "narrate before/around the JSON and needs more room to reach the closing brace, "
+                         "so the whole holdout set was ending unparsed (truncated mid-JSON).")
+    parser.add_argument("--max-seq-length", type=int, default=4096,
+                         help="Match training/prepare_qlora.py's budget so holdout prompts aren't right-"
+                         "truncated more aggressively at eval time than they were during training.")
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
     if not args.adapter and not args.base_model:
