@@ -65,8 +65,8 @@ Copy `training/train_qwen_qlora.py` into the notebook or clone the repository if
   --max-seq-length 4096 \
   --epochs 4 \
   --learning-rate 2e-4 \
-  --batch-size 2 \
-  --grad-accumulation 8 \
+  --batch-size 1 \
+  --grad-accumulation 16 \
   --lora-r 16 \
   --lora-alpha 32 \
   --lora-dropout 0.05 \

@@ -30,6 +30,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+
+# Reduce allocator fragmentation on long-sequence QLoRA runs; the CUDA OOM
+# error itself suggests this. Harmless if unsupported by the installed torch
+# build. Must be set before any CUDA context is created (i.e. before torch
+# or unsloth are imported below).
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
 import sys
 from pathlib import Path
 from typing import Any
@@ -133,8 +140,14 @@ def main() -> int:
     parser.add_argument("--max-seq-length", type=int, default=4096)
     parser.add_argument("--epochs", type=float, default=4.0, help="Upper bound; early stopping usually stops sooner.")
     parser.add_argument("--learning-rate", type=float, default=2e-4)
-    parser.add_argument("--batch-size", type=int, default=2)
-    parser.add_argument("--grad-accumulation", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=1,
+                         help="Per-device micro-batch size. A single T4 (15GB) can OOM on batch_size=2 "
+                         "the moment two long sequences (near max_seq_length) land in the same micro-batch "
+                         "-- that's a property of which examples happen to co-occur, so it isn't caught by "
+                         "the earlier steps succeeding. batch_size=1 caps the worst case at one long "
+                         "sequence per forward/backward pass; raise --grad-accumulation to keep the same "
+                         "effective batch size.")
+    parser.add_argument("--grad-accumulation", type=int, default=16)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument(
