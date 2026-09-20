@@ -137,7 +137,12 @@ def main() -> int:
     parser.add_argument("--valid", type=Path, default=Path("/kaggle/input/pre-cab/qwen_qlora_valid.jsonl"))
     parser.add_argument("--output", type=Path, default=Path("/kaggle/working/pre_cab_qwen"))
     parser.add_argument("--model", default="unsloth/Qwen2.5-7B-Instruct")
-    parser.add_argument("--max-seq-length", type=int, default=4096)
+    parser.add_argument("--max-seq-length", type=int, default=3072,
+                         help="Lower than the 4096 used for data prep -- on a single 15GB T4, activation "
+                         "memory for a 7B model scales with sequence length, and 4096 leaves too little "
+                         "headroom even at batch_size=1 with the optimizer/gradient overhead. Most training "
+                         "rows are well under this per the length audit; the few that aren't get "
+                         "shrunk-or-dropped by the same safety net as before, just against a tighter budget.")
     parser.add_argument("--epochs", type=float, default=4.0, help="Upper bound; early stopping usually stops sooner.")
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--batch-size", type=int, default=1,
@@ -148,6 +153,10 @@ def main() -> int:
                          "sequence per forward/backward pass; raise --grad-accumulation to keep the same "
                          "effective batch size.")
     parser.add_argument("--grad-accumulation", type=int, default=16)
+    parser.add_argument("--optim", default="paged_adamw_8bit",
+                         help="paged_adamw_8bit pages optimizer state to CPU under GPU memory pressure "
+                         "instead of OOMing outright -- meaningfully safer than adamw_8bit on a 15GB card, "
+                         "at a small throughput cost.")
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument(
@@ -234,7 +243,7 @@ def main() -> int:
         load_best_model_at_end=has_eval,
         metric_for_best_model="eval_loss" if has_eval else None,
         greater_is_better=False if has_eval else None,
-        optim="adamw_8bit",
+        optim=args.optim,
         fp16=not use_bf16,
         bf16=use_bf16,
         seed=args.seed,
@@ -307,6 +316,7 @@ def main() -> int:
             "learning_rate": args.learning_rate,
             "batch_size": args.batch_size,
             "grad_accumulation": args.grad_accumulation,
+            "optim": args.optim,
             "effective_batch_size": args.batch_size * args.grad_accumulation,
             "seed": args.seed,
             "response_only_loss_masking": response_masking_applied,
