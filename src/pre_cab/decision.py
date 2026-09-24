@@ -300,7 +300,7 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
         "Configuration item", "Environment", "Change plan", "Work notes", "Comments",
         "UAT signoff", "Customer Approval", "TCS QA signoff", "Test Results Evidence",
         "Lower Environment Reference CR/SR", "Risk", "Category", "Sub Category",
-        "Planned start", "Planned end", "Conflict status",
+        "Planned start", "Planned end", "Conflict status", "Priority",
     }
     required_names = {req.name for req in requirements if req.required}
     for item in fr_report.findings:
