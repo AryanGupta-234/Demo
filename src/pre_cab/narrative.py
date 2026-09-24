@@ -254,6 +254,9 @@ def _cab_questions(cr: dict[str, Any], agent_results: list[Any], brain_payload: 
 def _recommendations(cr: dict[str, Any], findings: list[Any], brain_payload: dict[str, Any] | None = None) -> list[str]:
     deterministic: list[str] = []
     for finding in findings:
+        severity = getattr(finding, "severity", None)
+        if severity not in {FindingSeverity.BLOCKING, FindingSeverity.WARNING}:
+            continue
         rec = getattr(finding, "recommendation", "") or ""
         if rec and rec not in deterministic:
             deterministic.append(rec)
