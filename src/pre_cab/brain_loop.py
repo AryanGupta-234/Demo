@@ -13,7 +13,7 @@ from .memory import MemoryKind, UnifiedMemory
 from .models import ModelProvider, ModelResponse
 from .retrieval import build_cr_query
 from .sanitization import sanitize_cr_for_reasoning, sanitize_value
-from .rules import effective_environment, model_field_validation, non_prod_validation_state
+from .rules import change_profile, contradiction_signals, effective_environment, evidence_matrix, model_field_validation, non_prod_validation_state
 from .schemas import AgentContext, Finding
 
 _JSON_OBJECT_FORMAT = {"type": "json_object"}
@@ -162,11 +162,22 @@ class AgenticReasoningLoop:
         payload["comments"] = journal.get("comments")
         payload["journal_context"] = journal
         payload["model_field_validation"] = model_field_validation(context.cr)
+        payload["change_profile"] = change_profile(context.cr)
+        payload["evidence_matrix"] = evidence_matrix(context.cr)
+        payload["deterministic_contradictions"] = contradiction_signals(context.cr)
         payload["workflow_context"] = {
             "effective_environment": effective_environment(context.cr),
             "environment_is_derived_when_unset": not bool(str(context.cr.get("Environment") or "").strip()),
             "change_workflow_target": "PROD",
             "non_prod_validation": non_prod_validation_state(context.cr),
+        }
+        payload["evidence_interpretation_policy"] = {
+            "classify_before_scoring": True,
+            "current_execution_beats_plan": True,
+            "historical_references_are_context_only": True,
+            "formal_test_results_not_universal_for_infrastructure": True,
+            "non_prod_labels_equivalent": ["SIT", "UAT", "Pre-PROD", "staging", "lower environment", "test environment"],
+            "missing_metadata_is_not_automatically_a_technical_failure": True,
         }
         payload["work_notes_policy"] = {
             "same_cr_only": True,
@@ -250,7 +261,10 @@ class AgenticReasoningLoop:
             "history, or policy. Separate facts, inferences, uncertainties and contradictions and challenge false-PASS risk. "
             "Treat SIT/UAT/Pre-PROD/lower-environment references as one non-PROD validation class, do not report an unset "
             "Environment as missing in this PROD workflow, and keep missing CI as traceability unless explicitly gated. "
-            "Validate all 14 model-facing fields even when some are legitimately unset or Not Applicable. cab_reasoning and technical_reasoning serve two different readers and are shown to both together — write "
+            "Validate all 14 model-facing fields even when some are legitimately unset or Not Applicable. Classify the change before deciding "
+            "which evidence is mandatory. Use change_profile and evidence_matrix as deterministic context. Do not turn informational "
+            "governance gaps into readiness blockers. A historical CR reference proves only that an example exists, not that this CR "
+            "was tested. cab_reasoning and technical_reasoning serve two different readers and are shown to both together — write "
             "cab_reasoning so a non-technical CAB member understands the decision and its business impact on its own, and "
             "write technical_reasoning so an engineer gets the specific field-level evidence behind it; do not make one "
             "depend on the other to be understood."
