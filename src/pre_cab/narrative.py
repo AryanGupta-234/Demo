@@ -116,8 +116,14 @@ def _checklist(
 
 
 def _key_gaps(findings: list[Any], limit: int = 6) -> list[Any]:
-    ranked = {FindingSeverity.BLOCKING: 0, FindingSeverity.WARNING: 1, FindingSeverity.INFO: 2}
-    return sorted(findings, key=lambda f: ranked.get(getattr(f, "severity", FindingSeverity.INFO), 2))[:limit]
+    # Decision drivers are material readiness items only. Informational observations
+    # remain visible in detailed sections but never crowd the actual reason.
+    material = [
+        f for f in findings
+        if getattr(f, "severity", FindingSeverity.INFO) in {FindingSeverity.BLOCKING, FindingSeverity.WARNING}
+    ]
+    ranked = {FindingSeverity.BLOCKING: 0, FindingSeverity.WARNING: 1}
+    return sorted(material, key=lambda f: ranked.get(getattr(f, "severity", FindingSeverity.WARNING), 1))[:limit]
 
 
 def _decision_summary(
@@ -141,14 +147,6 @@ def _decision_summary(
     names = [getattr(f, "title", "validation gap") for f in gaps if getattr(f, "code", "")]
 
     if brain_payload:
-        # The model's output_contract (see brain_loop.py) asks for
-        # "cab_reasoning" (plain-language CAB decision rationale) and
-        # "technical_reasoning" (substantive technical assessment) — it has
-        # never been asked to produce an "executive_summary" key, so
-        # looking that key up here always returned nothing and silently
-        # fell through to the generic template below on every AI-assisted
-        # run, even when the model's own dual-audience reasoning was sitting
-        # right there in the same payload. Read the keys that actually exist.
         cab_reasoning = _text(brain_payload.get("cab_reasoning"))
         technical_reasoning = _text(brain_payload.get("technical_reasoning"))
         if cab_reasoning:
@@ -296,8 +294,13 @@ def format_cab_result(
     clone_candidates = clone_agent.notes.get("clone_candidates", []) if clone_agent else []
     top_clone = clone_candidates[0] if clone_candidates else None
     summary, drivers = _decision_summary(cr, decision, findings, brain_payload)
+    has_observations = any(
+        getattr(f, "severity", FindingSeverity.INFO) == FindingSeverity.INFO
+        and getattr(f, "code", "") not in {"CHANGE_TYPE_CONTEXT", "TARGET_ENVIRONMENT_DERIVED", "UAT_NOT_MANDATORY"}
+        for f in findings
+    )
     prediction_label = {
-        Decision.PASS: "✅ CAB READY",
+        Decision.PASS: "✅ CAB-READY WITH OBSERVATIONS" if has_observations else "✅ CAB-READY",
         Decision.CONDITIONAL: "⚠️ CONDITIONAL — REVIEW REQUIRED",
         Decision.NOT_READY: "❌ NOT READY",
     }[decision]
