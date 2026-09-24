@@ -126,7 +126,10 @@ class ContextAgent(BaseAgent):
 
     def run(self, context: AgentContext) -> AgentResult:
         from .requirements import infer_requirements
+        from .rules import change_profile, contradiction_signals
         predictions = infer_requirements(context.cr)
+        profile = change_profile(context.cr)
+        contradictions = contradiction_signals(context.cr)
         findings = [
             Finding(
                 code="CONTEXT_REQUIREMENTS",
@@ -136,10 +139,26 @@ class ContextAgent(BaseAgent):
                 technical_detail="; ".join(f"{p.name}={p.required} ({p.confidence:.2f})" for p in predictions),
             )
         ]
+        for signal in contradictions:
+            findings.append(Finding(
+                signal["code"], "Context contradiction detected", FindingSeverity.WARNING,
+                signal["message"], recommendation="Reconcile the conflicting statements before CAB review.",
+            ))
         return AgentResult(self.name, findings, [
             {"name": p.name, "required": p.required, "confidence": p.confidence, "reason": p.reason, "signals": list(p.signals)}
             for p in predictions
-        ], {})
+        ], {
+            "change_profile": profile,
+            "contradiction_signals": contradictions,
+            "chain": [
+                f"primary change archetype = {profile['primary_archetype']}",
+                f"archetypes = {', '.join(profile['archetypes'])}",
+                f"formal test evidence expected = {profile['formal_test_evidence_expected']}",
+                f"non-PROD validation expected = {profile['non_prod_validation_expected']}",
+                f"customer approval expected = {profile['approval_expected']}",
+                f"context confidence = {profile['confidence']:.0%}",
+            ],
+        })
 
 
 class TechnicalAgent(BaseAgent):
@@ -163,7 +182,8 @@ class TechnicalAgent(BaseAgent):
             "Backout plan", "Work notes", "Comments", "Test plan",
         )).lower()
         dependency_terms = ("dependency", "dependencies", "sequence", "sequencing", "before", "after", "prerequisite")
-        dependency_evidence_present = bool(change_plan) or flags.get("non-prod-validation", False) or any(term in operational_context for term in dependency_terms)
+        # Non-PROD testing is evidence of validation, not evidence of dependency/sequencing.
+        dependency_evidence_present = bool(change_plan) or any(term in operational_context for term in dependency_terms)
         present_signals = sum([implementation_present, rollback_ok, bool(test_plan), dependency_evidence_present])
         uncertainty = "low" if present_signals >= 3 else ("medium" if present_signals >= 2 else "high")
         chain = [
@@ -223,11 +243,13 @@ class TestingAgent(BaseAgent):
 
     def run(self, context: AgentContext) -> AgentResult:
         from .requirements import infer_requirements
-        from .rules import context_flags, signoff_disposition
+        from .rules import context_flags, signoff_disposition, evidence_matrix, change_profile
         cr = context.cr
         predictions = infer_requirements(cr)
         uat = next((prediction for prediction in predictions if prediction.name == "UAT"), None)
         flags = context_flags(cr)
+        profile = change_profile(cr)
+        matrix = evidence_matrix(cr)
         test_plan = str(cr.get("Test plan") or "").strip()
         evidence = str(cr.get("Test Results Evidence") or "").strip()
         journal = " ".join(str(cr.get(field) or "") for field in ("Work notes", "Comments")).lower()
@@ -237,26 +259,26 @@ class TestingAgent(BaseAgent):
             "verified", "verification completed", "passed", "successful",
             "patching completed", "checks completed",
         )
-        execution_claimed = any(term in journal for term in execution_terms)
-        formal_evidence_positive = signoff_disposition(evidence) == "POSITIVE"
-        infrastructure = bool(flags.get("infrastructure"))
-        functional_change = bool(flags.get("functional") and not infrastructure)
+        execution_claimed = bool(matrix["execution_claimed"])
+        formal_evidence_positive = bool(matrix["formal_evidence_positive"])
+        infrastructure = bool(profile["infrastructure"])
+        functional_change = bool(profile["functional"] and not profile["infrastructure"])
         findings: list[Finding] = []
         if not test_plan:
             findings.append(Finding("TEST_PLAN_MISSING", "Testing plan missing", FindingSeverity.WARNING, "No testing plan is populated in the CR.", recommendation="Provide an applicable test approach or documented rationale."))
-        if functional_change and not (formal_evidence_positive or execution_claimed):
+        if profile["formal_test_evidence_expected"] and not (formal_evidence_positive or execution_claimed):
             findings.append(Finding(
                 "TEST_EXECUTION_UNCONFIRMED", "Test execution is not evidenced", FindingSeverity.WARNING,
                 "The change appears functionally relevant, but neither a positive test-evidence disposition nor execution evidence in Work Notes/Comments is recorded.",
                 recommendation="Record the executed validation and result before approval.",
             ))
-        elif infrastructure and not (formal_evidence_positive or execution_claimed):
+        elif infrastructure and not execution_claimed:
             findings.append(Finding(
                 "TECHNICAL_VALIDATION_UNCONFIRMED", "Post-change validation result is not recorded", FindingSeverity.INFO,
                 "The infrastructure test approach is defined, but the reviewed CR does not yet contain a positive test-evidence disposition or explicit execution result in Work Notes/Comments.",
                 recommendation="Record the post-change sanity-check result when executed.",
             ))
-        coverage_ok = bool(test_plan) and (not functional_change or formal_evidence_positive or execution_claimed)
+        coverage_ok = bool(test_plan) and (not profile["formal_test_evidence_expected"] or formal_evidence_positive or execution_claimed)
         chain = [
             "non-PROD validation mentioned (SIT/UAT/Pre-PROD/lower environment are treated equivalently)" if flags.get("non-prod-validation") else "no non-PROD validation reference stated",
             "test plan is defined" if test_plan else "test plan is missing",
@@ -272,7 +294,7 @@ class TestingAgent(BaseAgent):
                 f"UAT required={uat.required if uat else False}; "
                 f"{uat.reason if uat else 'no UAT prediction'}; "
                 f"non-PROD validation claimed={bool(flags.get('non-prod-validation'))}; "
-                f"test-results disposition={signoff_disposition(evidence)}"
+                f"test-results disposition={signoff_disposition(evidence)}; applicable formal evidence={profile['formal_test_evidence_expected']}"
             ),
         ))
         return AgentResult(
@@ -288,6 +310,9 @@ class TestingAgent(BaseAgent):
                 "functional_coverage_ok": coverage_ok,
                 "formal_evidence_present": formal_evidence_positive,
                 "non_prod_validation_equivalence": "SIT/UAT/Pre-PROD/lower environment treated as one validation class",
+                "change_profile": profile,
+                "evidence_matrix": matrix,
+                "historical_test_reference_in_plan": matrix["historical_test_reference_in_plan"],
             },
         )
 
@@ -296,11 +321,12 @@ class RiskAgent(BaseAgent):
     name = "risk"
 
     def run(self, context: AgentContext) -> AgentResult:
-        from .rules import context_flags
+        from .rules import context_flags, change_profile
         cr = context.cr
         risk = str(cr.get("Risk") or "").strip()
         impact = str(cr.get("Risk and impact analysis") or "").strip()
         flags = context_flags(cr)
+        profile = change_profile(cr)
         elevated_impact = bool(flags.get("elevated-impact"))
         declared_low = risk.lower() in {"low", "none", "minimal", "minimal risk"}
         contradiction = declared_low and elevated_impact
@@ -312,9 +338,9 @@ class RiskAgent(BaseAgent):
         if contradiction:
             findings.append(Finding("RISK_IMPACT_CONTRADICTION", "Declared risk conflicts with impact narrative", FindingSeverity.WARNING, f"Risk is declared {risk!r} but the change context suggests elevated production impact.", technical_detail=impact[:2000], recommendation="Reconcile the declared risk level with the described impact before CAB review."))
         findings.append(Finding("RISK_CONTEXT", "Risk context captured", FindingSeverity.INFO, f"Declared risk: {risk or 'unknown'}.", technical_detail=impact[:4000]))
-        impact_level = "elevated" if elevated_impact else "moderate" if impact else "unstated"
+        impact_level = "elevated" if profile["high_impact"] else "moderate" if impact else "unstated"
         chain = [f"declared risk = {risk or 'unknown'}", f"impact narrative suggests {impact_level} production exposure" if impact else "no impact narrative provided", "contradiction: declared risk conflicts with impact narrative" if contradiction else "no direct contradiction", f"confidence {confidence:.2f}"]
-        return AgentResult(self.name, findings, [], {"chain": chain, "risk_confidence": confidence, "contradiction": contradiction})
+        return AgentResult(self.name, findings, [], {"chain": chain, "risk_confidence": confidence, "contradiction": contradiction, "change_profile": profile})
 
 
 class EvidenceAgent(BaseAgent):
