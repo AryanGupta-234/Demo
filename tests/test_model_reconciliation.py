@@ -90,3 +90,27 @@ def test_final_reasoning_metadata_is_not_stale_after_run_pre_cab() -> None:
     assert meta["model"] == "test-gpt-oss-120b"
     assert meta["reasoning_mode"] != "none"
     assert meta["model_prediction"] == "PASS"
+
+
+def test_model_failure_does_not_downgrade_deterministic_pass() -> None:
+    from pre_cab.final_reasoning import FinalReasoningResult, reconcile_final_decision
+    reasoning = FinalReasoningResult(
+        reasoning=None,
+        model_prediction=None,
+        payload=None,
+        error="simulated local reasoning failure",
+    )
+    decision, finding = reconcile_final_decision(Decision.PASS, reasoning)
+    assert decision == Decision.PASS
+    assert finding is not None
+    assert finding.severity.value == "INFO"
+    assert finding.code == "FINAL_REASONING_UNAVAILABLE"
+
+
+def test_non_normal_change_type_is_context_not_hard_block() -> None:
+    from pre_cab.decision import validate_fields
+    cr = _good_cr()
+    cr["Type"] = "Standard"
+    result = validate_fields(cr, Strictness.BALANCED)
+    assert any(f.code == "CHANGE_TYPE_CONTEXT" for f in result.findings)
+    assert not any(f.code == "OUT_OF_SCOPE" for f in result.findings)
