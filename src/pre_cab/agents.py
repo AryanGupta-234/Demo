@@ -35,7 +35,8 @@ class FieldAgent(BaseAgent):
 
     _DESCRIPTIVE_FIELDS = (
         "Short description", "Description", "Justification", "Implementation plan",
-        "Change plan", "Backout plan", "Test plan", "Configuration item", "Risk", "Priority",
+        "Change plan", "Backout plan", "Work notes", "Comments", "Test plan",
+        "Configuration item", "Risk", "Priority",
     )
     _SIGNOFF_FIELDS = (
         "UAT signoff", "Customer Approval", "TCS QA signoff",
@@ -146,24 +147,32 @@ class TechnicalAgent(BaseAgent):
 
     def run(self, context: AgentContext) -> AgentResult:
         from .decision import rollback_quality
+        from .rules import context_flags, effective_environment
         cr = context.cr
+        flags = context_flags(cr)
         implementation = str(cr.get("Implementation plan") or "").strip()
+        change_plan = str(cr.get("Change plan") or "").strip()
         backout = str(cr.get("Backout plan") or "").strip()
         ci = str(cr.get("Configuration item") or "").strip()
-        evidence = str(cr.get("Test Results Evidence") or "").strip()
-        lower_env_ref = str(cr.get("Lower Environment Reference CR/SR") or "").strip()
+        test_plan = str(cr.get("Test plan") or "").strip()
         implementation_present = bool(implementation)
-        ci_present = bool(ci)
         rollback_ok, rollback_reason, _explicit_na = rollback_quality(backout)
         rollback_aligned = rollback_ok and implementation_present
-        dependency_evidence_present = (bool(evidence) and evidence.lower() not in {"na", "n/a", "none"}) or (bool(lower_env_ref) and lower_env_ref.lower() not in {"na", "n/a", "none", "not applicable"})
-        present_signals = sum([implementation_present, ci_present, rollback_ok, dependency_evidence_present])
-        uncertainty = "low" if present_signals >= 4 else ("medium" if present_signals >= 2 else "high")
+        operational_context = " ".join(str(cr.get(k) or "") for k in (
+            "Description", "Justification", "Implementation plan", "Change plan",
+            "Backout plan", "Work notes", "Comments", "Test plan",
+        )).lower()
+        dependency_terms = ("dependency", "dependencies", "sequence", "sequencing", "before", "after", "prerequisite")
+        dependency_evidence_present = bool(change_plan) or flags.get("non-prod-validation", False) or any(term in operational_context for term in dependency_terms)
+        present_signals = sum([implementation_present, rollback_ok, bool(test_plan), dependency_evidence_present])
+        uncertainty = "low" if present_signals >= 3 else ("medium" if present_signals >= 2 else "high")
         chain = [
             "implementation is present" if implementation_present else "implementation is not described",
-            "configuration item identified" if ci_present else "no configuration item identified",
+            "configuration item identified" if ci else "configuration item not identified; traceability observation only",
+            f"target environment resolved as {effective_environment(cr)}" + (" from workflow context" if not str(cr.get("Environment") or "").strip() else ""),
             "rollback mechanism aligns with implementation" if rollback_aligned else "rollback mechanism could not be correlated with implementation",
-            "dependency/lower-environment validation evidence present" if dependency_evidence_present else "no evidence of dependency validation",
+            "non-PROD validation reference found (SIT/UAT/Pre-PROD/lower environment treated equivalently)" if flags.get("non-prod-validation") else "no non-PROD validation reference stated",
+            "dependency/sequencing context is present" if dependency_evidence_present else "dependency/sequencing context is not explicitly stated",
             f"{uncertainty} technical uncertainty",
         ]
         finding = Finding("TECH_SCOPE", "Technical scope extracted", FindingSeverity.INFO, "Technical implementation scope has been captured for deeper review.", technical_detail=f"CI={ci!r}; implementation={implementation[:2500]}; backout={backout[:1500]}")
@@ -198,26 +207,73 @@ class TestingAgent(BaseAgent):
 
     def run(self, context: AgentContext) -> AgentResult:
         from .requirements import infer_requirements
+        from .rules import context_flags, signoff_disposition
         cr = context.cr
         predictions = infer_requirements(cr)
         uat = next((prediction for prediction in predictions if prediction.name == "UAT"), None)
+        flags = context_flags(cr)
         test_plan = str(cr.get("Test plan") or "").strip()
         evidence = str(cr.get("Test Results Evidence") or "").strip()
+        journal = " ".join(str(cr.get(field) or "") for field in ("Work notes", "Comments")).lower()
+        execution_terms = (
+            "tested", "test completed", "testing completed", "validated",
+            "validation completed", "sanity check completed", "sanity completed",
+            "verified", "verification completed", "passed", "successful",
+            "patching completed", "checks completed",
+        )
+        execution_claimed = any(term in journal for term in execution_terms)
+        formal_evidence_positive = signoff_disposition(evidence) == "POSITIVE"
+        infrastructure = bool(flags.get("infrastructure"))
+        functional_change = bool(flags.get("functional") and not infrastructure)
         findings: list[Finding] = []
         if not test_plan:
             findings.append(Finding("TEST_PLAN_MISSING", "Testing plan missing", FindingSeverity.WARNING, "No testing plan is populated in the CR.", recommendation="Provide an applicable test approach or documented rationale."))
-        narrative_text = " ".join(str(cr.get(field) or "") for field in ("Test plan", "Description", "Lower Environment Reference CR/SR")).lower()
-        pre_prod_claimed = any(term in narrative_text for term in ("pre-prod", "pre prod", "uat", "staging", "sit environment", "test environment"))
-        evidence_present = bool(evidence) and evidence.strip().lower() not in {"na", "n/a", "none", "not applicable"}
-        functional_coverage_ok = bool(test_plan) and evidence_present
+        if functional_change and not (formal_evidence_positive or execution_claimed):
+            findings.append(Finding(
+                "TEST_EXECUTION_UNCONFIRMED", "Test execution is not evidenced", FindingSeverity.WARNING,
+                "The change appears functionally relevant, but neither a positive test-evidence disposition nor execution evidence in Work Notes/Comments is recorded.",
+                recommendation="Record the executed validation and result before approval.",
+            ))
+        elif infrastructure and not (formal_evidence_positive or execution_claimed):
+            findings.append(Finding(
+                "TECHNICAL_VALIDATION_UNCONFIRMED", "Post-change validation result is not recorded", FindingSeverity.INFO,
+                "The infrastructure test approach is defined, but the reviewed CR does not yet contain a positive test-evidence disposition or explicit execution result in Work Notes/Comments.",
+                recommendation="Record the post-change sanity-check result when executed.",
+            ))
+        coverage_ok = bool(test_plan) and (not functional_change or formal_evidence_positive or execution_claimed)
         chain = [
-            "pre-PROD testing claimed" if pre_prod_claimed else "no pre-PROD testing claimed",
-            "test execution evidence present" if evidence_present else "no test execution evidence",
+            "non-PROD validation mentioned (SIT/UAT/Pre-PROD/lower environment are treated equivalently)" if flags.get("non-prod-validation") else "no non-PROD validation reference stated",
+            "test plan is defined" if test_plan else "test plan is missing",
+            "formal test-results evidence is recorded" if formal_evidence_positive else "formal test-results evidence is not positively recorded",
+            "execution result is supported by Work Notes/Comments" if execution_claimed else "Work Notes/Comments do not record a completed validation result",
             "UAT required based on change context" if (uat and uat.required) else "UAT not required based on change context",
-            "functional coverage appears adequate" if functional_coverage_ok else "functional coverage remains uncertain",
+            "functional coverage appears adequate" if coverage_ok else "functional coverage remains uncertain",
         ]
-        findings.append(Finding("TESTING_CONTEXT", "Testing requirement assessed", FindingSeverity.INFO, "Testing requirement was inferred from the CR context.", technical_detail=f"UAT required={uat.required if uat else False}; {uat.reason if uat else 'no UAT prediction'}; evidence field={evidence!r}"))
-        return AgentResult(self.name, findings, ([{"name": "UAT", "required": uat.required, "reason": uat.reason}] if uat else []), {"chain": chain, "pre_prod_claimed": pre_prod_claimed, "evidence_present": evidence_present, "functional_coverage_ok": functional_coverage_ok})
+        findings.append(Finding(
+            "TESTING_CONTEXT", "Testing requirement assessed", FindingSeverity.INFO,
+            "Testing requirements and evidence were evaluated against the change context.",
+            technical_detail=(
+                f"UAT required={uat.required if uat else False}; "
+                f"{uat.reason if uat else 'no UAT prediction'}; "
+                f"non-PROD validation claimed={bool(flags.get('non-prod-validation'))}; "
+                f"test-results disposition={signoff_disposition(evidence)}"
+            ),
+        ))
+        return AgentResult(
+            self.name,
+            findings,
+            ([{"name": "UAT", "required": uat.required, "reason": uat.reason}] if uat else []),
+            {
+                "chain": chain,
+                "pre_prod_claimed": bool(flags.get("non-prod-validation")),
+                "non_prod_validation_claimed": bool(flags.get("non-prod-validation")),
+                "execution_claimed": execution_claimed,
+                "evidence_present": formal_evidence_positive,
+                "functional_coverage_ok": coverage_ok,
+                "formal_evidence_present": formal_evidence_positive,
+                "non_prod_validation_equivalence": "SIT/UAT/Pre-PROD/lower environment treated as one validation class",
+            },
+        )
 
 
 class RiskAgent(BaseAgent):
@@ -261,8 +317,9 @@ class CloneAgent(BaseAgent):
         if not self.memory:
             return AgentResult(self.name, [], [], {"clone_candidates": []})
         from .clone import clone_analysis
-        query = " ".join(str(context.cr.get(k) or "") for k in ("Short description", "Description", "Category", "Sub Category", "Configuration item"))
-        matches = self.memory.search(query, kinds=[MemoryKind.CAB_HISTORY, MemoryKind.SIMILARITY], limit=8)
+        from .retrieval import build_cr_query
+        query = build_cr_query(context.cr)
+        matches = self.memory.search(query, kinds=[MemoryKind.CAB_HISTORY, MemoryKind.SIMILARITY], limit=12)
         analyses: list[dict[str, Any]] = []
         findings: list[Finding] = []
         for match in matches:
