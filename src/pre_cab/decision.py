@@ -72,6 +72,8 @@ def _missing_severity(policy_name: str, declared: str, strictness: Strictness) -
     Identity, implementation and recovery gaps are hard blockers. Other gaps are warnings in
     balanced/lenient mode and become blockers under strict mode when the rule declares them blocking.
     """
+    if declared.upper() == "INFO":
+        return FindingSeverity.INFO
     if declared.upper() == "BLOCKING":
         return FindingSeverity.BLOCKING
     if strictness == Strictness.STRICT:
@@ -119,7 +121,8 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
                 technical_detail=f"Matched conditions={matched_flags or ('baseline',)}; domain={policy.domain}.",
                 recommendation=f"Populate {policy.label.lower()} before CAB review.",
             ))
-            score -= STRICTNESS_PENALTIES[strictness]["warning"]
+            if severity != FindingSeverity.INFO:
+                score -= STRICTNESS_PENALTIES[strictness]["warning"]
 
     # Environment is a PROD workflow invariant. An unset field is resolved from workflow context
     # rather than reported as a missing-target defect.
@@ -243,12 +246,13 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
             score -= STRICTNESS_PENALTIES[strictness]["warning"]
     elif conflict in {"not run", "not checked", "unknown", ""}:
         findings.append(Finding(
-            "CONFLICT_UNVERIFIED", "Conflict status is not fully verified", FindingSeverity.WARNING,
+            "CONFLICT_UNVERIFIED", "Conflict status is not fully verified", FindingSeverity.INFO,
             "A current conflict check is not confirmed.",
             technical_detail=f"Conflict status={conflict!r}",
             recommendation="Run or verify the ServiceNow conflict check.",
         ))
-        score -= STRICTNESS_PENALTIES[strictness]["warning"]
+        # An unverified conflict check is governance metadata, not proof that the
+        # change itself is technically invalid. Keep it visible without altering readiness.
     else:
         findings.append(Finding(
             "NO_CONFLICT", "No blocking conflict reported", FindingSeverity.INFO,
