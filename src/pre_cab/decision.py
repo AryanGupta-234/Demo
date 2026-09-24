@@ -4,7 +4,7 @@ from __future__ import annotations
 from .field_requirement_engine import FieldRequirementEngine, RequirementLevel
 from .input_loader import normalize_change_type
 from .requirements import infer_requirements
-from .rules import context_flags, field_quality, required_field_policies
+from .rules import context_flags, effective_environment, field_quality, model_field_validation, required_field_policies, signoff_disposition
 from .schemas import Decision, Finding, FindingSeverity, Requirement, Strictness, ValidationResult
 
 STRICTNESS_PENALTIES = {
@@ -121,6 +121,41 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
             ))
             score -= STRICTNESS_PENALTIES[strictness]["warning"]
 
+    # Environment is a PROD workflow invariant. An unset field is resolved from workflow context
+    # rather than reported as a missing-target defect.
+    raw_environment = _text(cr.get("Environment"))
+    if raw_environment:
+        env_lower = raw_environment.lower()
+        if env_lower in {"uat", "sit", "pre-prod", "pre prod", "preprod", "staging", "test", "non-prod", "non prod"}:
+            findings.append(Finding(
+                "ENVIRONMENT_CONTEXT_CONTRADICTION",
+                "Target environment conflicts with PROD workflow",
+                FindingSeverity.WARNING,
+                f"The CR explicitly records target environment {raw_environment!r}, while this workflow handles PROD changes.",
+                technical_detail=f"Effective workflow environment=PROD; explicit Environment={raw_environment!r}.",
+                recommendation="Confirm the intended target environment before CAB review.",
+            ))
+    else:
+        findings.append(Finding(
+            "TARGET_ENVIRONMENT_DERIVED",
+            "Target environment resolved from workflow context",
+            FindingSeverity.INFO,
+            "Environment is not populated in the CR, but the active workflow establishes PROD as the target environment.",
+            technical_detail=f"Effective environment={effective_environment(cr)}.",
+        ))
+
+    # CI is still validated, but absence is a traceability observation rather than a
+    # technical/functional failure unless a separate explicit policy makes it blocking.
+    if not _text(cr.get("Configuration item")):
+        findings.append(Finding(
+            "CONFIGURATION_TRACEABILITY",
+            "Configuration Item not explicitly identified",
+            FindingSeverity.INFO,
+            "Configuration Item traceability is incomplete; this does not by itself invalidate implementation, testing, or rollback.",
+            technical_detail="CI is treated as an operational/CMDB traceability concern.",
+            recommendation="Populate the affected CI when available to improve traceability.",
+        ))
+
     # Preserve the dedicated recovery semantic check: presence is not enough.
     rollback_ok, rollback_reason, explicit_na = rollback_quality(cr.get("Backout plan"))
     if rollback_ok:
@@ -224,7 +259,16 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
     # Surface quality scores as non-blocking intelligence so GPT-OSS can reason on quality rather
     # than treating every populated field as equally good.
     quality = field_quality(cr)
-    low_quality = [item for item in quality if item.present and item.score < 0.45]
+    signoff_fields = {
+        "UAT signoff", "Customer Approval", "TCS QA signoff",
+        "Test Results Evidence", "Lower Environment Reference CR/SR",
+    }
+    low_quality = [
+        item for item in quality
+        if item.present
+        and item.score < 0.45
+        and not (item.field in signoff_fields and signoff_disposition(cr.get(item.field)) == "NOT_APPLICABLE")
+    ]
     if low_quality:
         findings.append(Finding(
             "FIELD_QUALITY_WEAK",
@@ -246,8 +290,15 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
         code.removeprefix("MISSING_").replace("_", " ") for code in (f.code for f in findings) if code.startswith("MISSING_")
     } | {"Customer Approval"}  # CUSTOMER_APPROVAL_GAP/PRESENT above already covers this field
     fr_report = _FIELD_REQUIREMENT_ENGINE.evaluate(cr)
+    advisory_fields = {
+        "Configuration item", "Environment", "Change plan", "Work notes", "Comments",
+        "UAT signoff", "TCS QA signoff", "Test Results Evidence", "Lower Environment Reference CR/SR",
+    }
+    required_names = {req.name for req in requirements if req.required}
     for item in fr_report.findings:
         if item.satisfied or item.requirement_level not in (RequirementLevel.REQUIRED, RequirementLevel.CONDITIONAL):
+            continue
+        if item.field in advisory_fields and item.field not in required_names:
             continue
         if item.field.upper() in {f.upper() for f in already_flagged_fields}:
             continue
@@ -285,12 +336,21 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
         findings=findings,
         requirements=requirements,
         technical_summary=(
-            "Centralized field-policy validation completed; contextual requirements and field quality "
-            "were evaluated, while attachments remain a separate evidence stage."
+            "Centralized validation covers the model-facing descriptive and signoff fields. "
+            "Applicability distinguishes infrastructure maintenance from customer-facing functional changes; "
+            "SIT/UAT/Pre-PROD/lower-environment references are treated as one non-PROD validation class, "
+            "PROD is derived from workflow context when Environment is unset, and CI gaps remain traceability "
+            "observations unless explicitly gated."
         ),
         cab_summary=decision.value.replace("_", " ").title(),
         metadata={
-            "rule_engine_version": "2.0",
+            "rule_engine_version": "2.1-context-aware",
+            "model_field_validation": model_field_validation(cr),
+            "workflow_context": {
+                "effective_environment": effective_environment(cr),
+                "environment_derived": not bool(_text(cr.get("Environment"))),
+                "non_prod_validation": context_flags(cr).get("non-prod-validation", False),
+            },
             "context_flags": flags,
             "required_field_count": sum(1 for _, required, _ in policies if required),
             "field_quality": [
