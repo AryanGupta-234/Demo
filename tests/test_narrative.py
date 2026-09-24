@@ -86,9 +86,31 @@ def test_format_cab_result_end_to_end_is_deep_and_evidence_focused():
     assert "CHG-TEST" in text
 
 
-def test_model_executive_summary_is_explicitly_labeled_as_ai_synthesis():
+def test_model_summary_uses_the_real_output_contract_keys():
+    """Regression test: format_cab_result's Executive Summary must be built
+    from the keys the model is actually asked for (cab_reasoning /
+    technical_reasoning per brain_loop.py's output_contract), not a
+    "executive_summary" key that was never part of that contract and so
+    never populated in a real run — see _decision_summary in narrative.py."""
     cr = {"Category": "Batch", "Implementation plan": "steps"}
-    brain = {"executive_summary": "The change has a material testing gap."}
+    brain = {
+        "cab_reasoning": "The change has a material testing gap that CAB should not approve yet.",
+        "technical_reasoning": "Test plan is populated but no execution evidence field is filled.",
+    }
     text = format_cab_result("CHG-TEST", cr, Decision.NOT_READY, 0.75, [], [], brain)
-    assert "AI synthesis:" in text
     assert "material testing gap" in text
+    assert "Technical basis:" in text
+    assert "no execution evidence field is filled" in text
+
+
+def test_model_summary_falls_back_to_template_without_cab_reasoning():
+    """If the model returns a payload with no cab_reasoning (e.g. an older/
+    malformed response), the Executive Summary must still be the
+    deterministic template — never blank, and never the raw
+    technical_reasoning text standing in for it."""
+    cr = {"Category": "Batch"}
+    brain = {"technical_reasoning": "only technical detail, no cab_reasoning"}
+    text = format_cab_result("CHG-TEST", cr, Decision.NOT_READY, 0.75, [], [], brain)
+    summary_section = text.split("EXECUTIVE SUMMARY")[1].split("Decision drivers:")[0]
+    assert "not CAB-ready" in summary_section
+    assert "only technical detail, no cab_reasoning" not in summary_section

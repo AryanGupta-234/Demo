@@ -210,11 +210,23 @@ class AgenticReasoningLoop:
             "inferences": "array of reasoned conclusions grounded in facts",
             "uncertainties": "array of unresolved items",
             "contradictions": "array of detected inconsistencies",
-            "technical_reasoning": "substantive technical assessment",
-            "cab_reasoning": "plain-language CAB decision rationale",
+            "technical_reasoning": (
+                "substantive technical assessment for an engineer: name the specific fields/evidence "
+                "checked, what they showed, and why that does or doesn't support readiness — concrete "
+                "enough that a reviewer could verify it against the CR record."
+            ),
+            "cab_reasoning": (
+                "plain-language CAB decision rationale for a non-technical business reviewer: no jargon, "
+                "explain in terms of business/operational impact and what's missing or satisfied — this is "
+                "the FIRST thing a reviewer reads, so it must stand alone and make the decision clear "
+                "without requiring the technical_reasoning field to make sense."
+            ),
             "cab_questions": "array of up to 4 useful CAB questions",
             "recommendations": "array of up to 4 concrete next actions",
-            "self_critique": "array of concise answers used to challenge the conclusion",
+            "self_critique": (
+                "array of concise answers to the self_critique_questions above — actually answer each "
+                "one for this CR, do not repeat the questions themselves back verbatim."
+            ),
         }
         payload["instruction"] = (
             "Return ONLY one valid JSON object. Analyze the current CR first using the fixed schema, mapped requirements, "
@@ -224,7 +236,11 @@ class AgenticReasoningLoop:
             "present state. Interpret signoff fields by disposition (Yes, No, Not Applicable, Completed, etc.). Work Notes and "
             "Comments are chronological journal evidence from this SAME CR. Never let a later journal entry silently overwrite "
             "current structured fields. UAT is contextual. Rollback must be credible. Never invent approvals, testing, evidence, "
-            "history, or policy. Separate facts, inferences, uncertainties and contradictions and challenge false-PASS risk."
+            "history, or policy. Separate facts, inferences, uncertainties and contradictions and challenge false-PASS risk. "
+            "cab_reasoning and technical_reasoning serve two different readers and are shown to both together — write "
+            "cab_reasoning so a non-technical CAB member understands the decision and its business impact on its own, and "
+            "write technical_reasoning so an engineer gets the specific field-level evidence behind it; do not make one "
+            "depend on the other to be understood."
         )
         return payload
 

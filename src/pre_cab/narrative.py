@@ -121,16 +121,36 @@ def _decision_summary(
     findings: list[Any],
     brain_payload: dict[str, Any] | None,
 ) -> tuple[str, list[str]]:
-    """Build a CAB-readable decision paragraph plus explicit decision drivers."""
-    if brain_payload:
-        model_summary = _text(brain_payload.get("executive_summary"))
-        if model_summary:
-            return f"AI synthesis: {model_summary}", []
+    """Build a CAB-readable decision paragraph plus explicit decision drivers.
 
+    Decision drivers are computed once, from the deterministic findings,
+    regardless of whether the model ran — a CAB reviewer (technical or not)
+    needs the "why" list either way, and previously the AI-summary branch
+    below returned an empty driver list every time the model actually ran,
+    which meant every AI-assisted report showed "See evidence and findings
+    below." for its Decision drivers, useful info discarded for nothing.
+    """
     blocking = [f for f in findings if getattr(f, "severity", None) == FindingSeverity.BLOCKING]
     warnings = [f for f in findings if getattr(f, "severity", None) == FindingSeverity.WARNING]
     gaps = _key_gaps(findings)
     names = [getattr(f, "title", "validation gap") for f in gaps if getattr(f, "code", "")]
+
+    if brain_payload:
+        # The model's output_contract (see brain_loop.py) asks for
+        # "cab_reasoning" (plain-language CAB decision rationale) and
+        # "technical_reasoning" (substantive technical assessment) — it has
+        # never been asked to produce an "executive_summary" key, so
+        # looking that key up here always returned nothing and silently
+        # fell through to the generic template below on every AI-assisted
+        # run, even when the model's own dual-audience reasoning was sitting
+        # right there in the same payload. Read the keys that actually exist.
+        cab_reasoning = _text(brain_payload.get("cab_reasoning"))
+        technical_reasoning = _text(brain_payload.get("technical_reasoning"))
+        if cab_reasoning:
+            parts = [cab_reasoning]
+            if technical_reasoning:
+                parts.append(f"Technical basis: {technical_reasoning}")
+            return " ".join(parts), names[:5]
 
     if decision == Decision.PASS:
         summary = (
