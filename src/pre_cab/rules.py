@@ -208,6 +208,257 @@ def _has_any(text: str, terms: Iterable[str]) -> bool:
     return any(term in text for term in terms)
 
 
+@dataclass(frozen=True)
+class ChangeProfile:
+    archetypes: tuple[str, ...]
+    primary_archetype: str
+    infrastructure: bool
+    functional: bool
+    security: bool
+    database: bool
+    network: bool
+    customer_facing: bool
+    service_restart: bool
+    high_impact: bool
+    production: bool
+    formal_test_evidence_expected: bool
+    non_prod_validation_expected: bool
+    approval_expected: bool
+    confidence: float
+
+
+def _has_negated_signal(text: str, phrase: str) -> bool:
+    """Return True when a signal is explicitly negated in nearby language."""
+    patterns = (
+        rf"\bno\s+{re.escape(phrase)}\b",
+        rf"\bwithout\s+{re.escape(phrase)}\b",
+        rf"\bnot\s+{re.escape(phrase)}\b",
+        rf"\bdoes\s+not\s+{re.escape(phrase)}\b",
+        rf"\bno\s+customer[- ]facing\s+{re.escape(phrase)}\b",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
+def _contextual_phrase(text: str, phrases: Iterable[str], *, exclude: Iterable[str] = ()) -> bool:
+    blocked = tuple(exclude)
+    for phrase in phrases:
+        if phrase in text and not any(neg in text for neg in blocked):
+            return True
+    return False
+
+
+def _score_signal(text: str, positive: Iterable[str], negative: Iterable[str] = ()) -> tuple[float, list[str]]:
+    score = 0.0
+    hits: list[str] = []
+    for phrase in positive:
+        if phrase in text:
+            if any(re.search(rf"\b{re.escape(neg)}\b", text[max(0, text.find(phrase)-60):text.find(phrase)+len(phrase)+60]) for neg in negative):
+                continue
+            score += 1.0
+            hits.append(phrase)
+    return score, hits
+
+
+def change_profile(cr: dict[str, Any]) -> dict[str, Any]:
+    """Build one explainable semantic profile reused by validation, agents and the model."""
+    text = _blob(cr)
+    category = _text(cr.get("Category"))
+    short_desc = _text(cr.get("Short description"))
+    description = _text(cr.get("Description"))
+    implementation = _text(cr.get("Implementation plan"))
+    test_plan = _text(cr.get("Test plan"))
+    risk = _text(cr.get("Risk"))
+    production = _text(cr.get("Environment")) in {"", "prod", "production", "production environment", "live"}
+
+    infrastructure_score, infrastructure_hits = _score_signal(
+        text,
+        ("infrastructure", "infra patch", "os patch", "server patch", "security patch", "server maintenance",
+         "server restart", "reboot", "middleware", "storage", "virtual machine", "vm"),
+    )
+    functional_score, functional_hits = _score_signal(
+        text,
+        ("enhancement", "defect", "bug fix", "workflow", "functional change", "interface change",
+         "application change", "api change", "user interface"),
+    )
+    customer_score, customer_hits = _score_signal(
+        text,
+        ("customer-facing", "customer facing", "external user", "customer impact", "customer transaction",
+         "payment processing", "branch transaction", "end-user", "end user"),
+        negative=("no", "without", "not"),
+    )
+    security_score, security_hits = _score_signal(
+        text,
+        ("security", "vulnerability", "zero-day", "patch", "certificate", "credential", "firewall",
+         "authentication", "authorization", "encryption"),
+    )
+    database_score, database_hits = _score_signal(
+        text, ("database", "schema", "stored procedure", "migration", "sql")
+    )
+    network_score, network_hits = _score_signal(
+        text, ("firewall", "network", "routing", "load balancer", "proxy", "dns", "connectivity")
+    )
+    restart_score, restart_hits = _score_signal(
+        text, ("restart", "reboot", "downtime", "maintenance window", "unavailable", "outage")
+    )
+
+    infrastructure = category in {"infrastructure", "infra"} or infrastructure_score >= 1
+    functional = functional_score >= 1 or (
+        not infrastructure and any(term in text for term in ("transaction enhancement", "customer-facing", "bug", "defect"))
+    )
+    customer_facing = customer_score >= 1
+    security = security_score >= 1
+    database = database_score >= 1
+    network = network_score >= 1
+    service_restart = restart_score >= 1
+
+    # "critical" alone is not enough. High impact should combine explicit impact language,
+    # high/critical declared risk, or a customer/service outage signal.
+    explicit_high_risk = risk in {"high", "critical", "1 - high", "2 - high", "very high"}
+    high_impact = explicit_high_risk or any(term in text for term in (
+        "high impact", "major outage", "production outage", "service unavailable", "customer outage",
+        "payment disruption", "transaction outage",
+    ))
+    archetypes: list[str] = []
+    if infrastructure:
+        archetypes.append("INFRASTRUCTURE")
+    if security:
+        archetypes.append("SECURITY")
+    if database:
+        archetypes.append("DATABASE")
+    if network:
+        archetypes.append("NETWORK")
+    if functional:
+        archetypes.append("FUNCTIONAL")
+    if customer_facing:
+        archetypes.append("CUSTOMER_FACING")
+    if service_restart:
+        archetypes.append("SERVICE_RESTART")
+    if not archetypes:
+        archetypes.append("GENERAL")
+    priority = (
+        "FUNCTIONAL" if functional and not infrastructure else
+        "DATABASE" if database and not infrastructure else
+        "NETWORK" if network and not infrastructure else
+        "SECURITY" if security and infrastructure else
+        "INFRASTRUCTURE" if infrastructure else
+        "CUSTOMER_FACING" if customer_facing else
+        "GENERAL"
+    )
+    # Formal evidence is primarily a functional/application control. Infra maintenance still
+    # needs executable validation, but the execution record can live in Work Notes/Comments.
+    formal_test = functional and not infrastructure
+    non_prod_expected = functional and not infrastructure and customer_facing
+    approval_expected = customer_facing
+    active_signals = sum(bool(x) for x in (
+        infrastructure, functional, security, database, network, customer_facing, service_restart, high_impact
+    ))
+    confidence = min(0.99, 0.58 + min(active_signals, 5) * 0.07)
+    return {
+        "archetypes": archetypes,
+        "primary_archetype": priority,
+        "infrastructure": infrastructure,
+        "functional": functional,
+        "security": security,
+        "database": database,
+        "network": network,
+        "customer_facing": customer_facing,
+        "service_restart": service_restart,
+        "high_impact": high_impact,
+        "production": production,
+        "formal_test_evidence_expected": formal_test,
+        "non_prod_validation_expected": non_prod_expected,
+        "approval_expected": approval_expected,
+        "confidence": confidence,
+        "signal_hits": {
+            "infrastructure": infrastructure_hits,
+            "functional": functional_hits,
+            "customer_facing": customer_hits,
+            "security": security_hits,
+            "database": database_hits,
+            "network": network_hits,
+            "service_restart": restart_hits,
+        },
+        "evidence_expectations": {
+            "implementation": True,
+            "rollback": True,
+            "test_plan": True,
+            "formal_test_results": formal_test,
+            "post_change_validation": True,
+            "non_prod_validation": non_prod_expected,
+            "customer_approval": approval_expected,
+            "change_window": production,
+        },
+    }
+
+
+def evidence_matrix(cr: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate evidence quality and applicability without collapsing all gaps into blockers."""
+    profile = change_profile(cr)
+    implementation = _text(cr.get("Implementation plan"))
+    backout = _text(cr.get("Backout plan"))
+    test_plan = _text(cr.get("Test plan"))
+    evidence = _text(cr.get("Test Results Evidence"))
+    journal = " ".join(str(cr.get(k) or "") for k in ("Work notes", "Comments")).strip().lower()
+    execution_terms = (
+        "tested", "testing completed", "test completed", "validation completed", "validated",
+        "verified", "verification completed", "sanity check completed", "passed", "successful",
+        "patching completed", "checks completed",
+    )
+    execution_claimed = bool(journal) and any(term in journal for term in execution_terms)
+    historical_ref = bool(re.search(r"\b(?:chg|cr|change)\s*\d{5,}\b", test_plan.lower()))
+    evidence_positive = signoff_disposition(evidence) == "POSITIVE"
+    dimensions = {
+        "implementation": bool(implementation),
+        "rollback": bool(backout) and backout not in {"na", "n/a", "none", "not applicable"},
+        "test_plan": bool(test_plan),
+        "formal_test_results": evidence_positive,
+        "post_change_execution": execution_claimed,
+    }
+    return {
+        "profile": profile,
+        "dimensions": dimensions,
+        "execution_claimed": execution_claimed,
+        "formal_evidence_positive": evidence_positive,
+        "historical_test_reference_in_plan": historical_ref,
+        "test_plan_is_currently_executable": bool(test_plan) and not (
+            historical_ref and len(test_plan) < 80
+        ),
+        "applicable_gaps": [
+            key for key, value in dimensions.items()
+            if not value and profile["evidence_expectations"].get(key, False)
+        ],
+        "interpretation": (
+            "Infrastructure maintenance: test plan + post-change validation are relevant; formal Test Results Evidence "
+            "and non-PROD validation are not universal gates."
+            if profile["infrastructure"]
+            else "Functional/application change: test execution or formal evidence is expected before readiness is established."
+        ),
+    }
+
+
+def contradiction_signals(cr: dict[str, Any]) -> list[dict[str, str]]:
+    """Detect direct claim conflicts before the LLM sees the record."""
+    profile = change_profile(cr)
+    blob = _blob(cr)
+    signals: list[dict[str, str]] = []
+    impact = _text(cr.get("Risk and impact analysis"))
+    risk = _text(cr.get("Risk"))
+    test_plan = _text(cr.get("Test plan"))
+    work = " ".join(str(cr.get(k) or "") for k in ("Work notes", "Comments")).lower()
+
+    if "no outage" in impact and any(term in blob for term in ("downtime", "outage", "unavailable")):
+        signals.append({"code": "IMPACT_CONTRADICTION", "message": "Impact narrative says no outage while another current field mentions outage/downtime."})
+    if risk in {"low", "minimal", "minimal risk"} and profile["high_impact"]:
+        signals.append({"code": "RISK_IMPACT_CONTRADICTION", "message": "Declared low risk conflicts with explicit high-impact signals."})
+    if profile["functional"] and not profile["infrastructure"] and not test_plan:
+        signals.append({"code": "FUNCTIONAL_TESTING_GAP", "message": "Functional/application change lacks a test plan."})
+    if work and any(term in work for term in ("completed successfully", "tested successfully", "validation passed")) and test_plan and "tbd" in test_plan:
+        signals.append({"code": "TEST_PLAN_EXECUTION_CONTRADICTION", "message": "Journal claims successful execution while the structured test plan still contains TBD language."})
+    if profile["infrastructure"] and profile["formal_test_evidence_expected"]:
+        signals.append({"code": "PROFILE_AMBIGUOUS", "message": "Change contains both infrastructure and functional signals; formal test evidence applicability should be reviewed rather than assumed."})
+    return signals
+
+
 def _has_word(text: str, terms: Iterable[str]) -> bool:
     """Whole-word match, not substring.
 
