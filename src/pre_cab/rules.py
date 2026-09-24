@@ -299,7 +299,8 @@ def change_profile(cr: dict[str, Any]) -> dict[str, Any]:
         text, ("firewall", "network", "routing", "load balancer", "proxy", "dns", "connectivity")
     )
     restart_score, restart_hits = _score_signal(
-        text, ("restart", "reboot", "downtime", "maintenance window", "unavailable", "outage")
+        text, ("restart", "reboot", "downtime", "maintenance window", "unavailable", "outage"),
+        negative=("no", "without", "not", "never"),
     )
 
     infrastructure = category in {"infrastructure", "infra"} or infrastructure_score >= 1
@@ -315,10 +316,13 @@ def change_profile(cr: dict[str, Any]) -> dict[str, Any]:
     # "critical" alone is not enough. High impact should combine explicit impact language,
     # high/critical declared risk, or a customer/service outage signal.
     explicit_high_risk = risk in {"high", "critical", "1 - high", "2 - high", "very high"}
-    high_impact = explicit_high_risk or any(term in text for term in (
-        "high impact", "major outage", "production outage", "service unavailable", "customer outage",
-        "payment disruption", "transaction outage",
-    ))
+    high_impact_score, _ = _score_signal(
+        text,
+        ("high impact", "major outage", "production outage", "service unavailable", "customer outage",
+         "payment disruption", "transaction outage"),
+        negative=("no", "without", "not", "never"),
+    )
+    high_impact = explicit_high_risk or high_impact_score > 0
     archetypes: list[str] = []
     if infrastructure:
         archetypes.append("INFRASTRUCTURE")
@@ -405,7 +409,18 @@ def evidence_matrix(cr: dict[str, Any]) -> dict[str, Any]:
         "verified", "verification completed", "sanity check completed", "passed", "successful",
         "patching completed", "checks completed",
     )
-    execution_claimed = bool(journal) and any(term in journal for term in execution_terms)
+    failed_terms = (
+        "test failed", "testing failed", "validation failed", "verification failed",
+        "failed successfully", "did not pass", "not successful", "unsuccessful", "issue found",
+        "error found", "validation error",
+    )
+    pending_terms = (
+        "pending", "not yet tested", "will test", "will be tested", "to be tested",
+        "testing planned", "validation planned", "awaiting validation",
+    )
+    failed_execution = bool(journal) and any(term in journal for term in failed_terms)
+    execution_claimed = bool(journal) and any(term in journal for term in execution_terms) and not failed_execution
+    execution_status = "FAILED" if failed_execution else ("PASSED" if execution_claimed else ("PENDING" if bool(journal) and any(term in journal for term in pending_terms) else "NOT_RECORDED"))
     historical_ref = bool(re.search(r"\b(?:chg|cr|change)\s*\d{5,}\b", test_plan.lower()))
     evidence_positive = signoff_disposition(evidence) == "POSITIVE"
     dimensions = {
@@ -414,6 +429,8 @@ def evidence_matrix(cr: dict[str, Any]) -> dict[str, Any]:
         "test_plan": bool(test_plan),
         "formal_test_results": evidence_positive,
         "post_change_execution": execution_claimed,
+        "execution_status": execution_status,
+        "execution_failed": failed_execution,
     }
     return {
         "profile": profile,
@@ -447,8 +464,16 @@ def contradiction_signals(cr: dict[str, Any]) -> list[dict[str, str]]:
     test_plan = _text(cr.get("Test plan"))
     work = " ".join(str(cr.get(k) or "") for k in ("Work notes", "Comments")).lower()
 
-    if "no outage" in impact and any(term in blob for term in ("downtime", "outage", "unavailable")):
-        signals.append({"code": "IMPACT_CONTRADICTION", "message": "Impact narrative says no outage while another current field mentions outage/downtime."})
+    non_impact_text = " ".join(str(cr.get(k) or "").lower() for k in (
+        "Short description", "Description", "Justification", "Implementation plan",
+        "Change plan", "Backout plan", "Work notes", "Comments", "Test plan"
+    ))
+    if "no outage" in impact and any(
+        re.search(rf"\b{re.escape(term)}\b", non_impact_text) and
+        not re.search(rf"\b(?:no|without|not)\s+(?:\w+\s+){{0,2}}{re.escape(term)}\b", non_impact_text)
+        for term in ("downtime", "outage", "unavailable")
+    ):
+        signals.append({"code": "IMPACT_CONTRADICTION", "message": "Impact narrative says no outage while another current field indicates service interruption."})
     if risk in {"low", "minimal", "minimal risk"} and profile["high_impact"]:
         signals.append({"code": "RISK_IMPACT_CONTRADICTION", "message": "Declared low risk conflicts with explicit high-impact signals."})
     if profile["functional"] and not profile["infrastructure"] and not test_plan:
