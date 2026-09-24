@@ -87,20 +87,20 @@ FIELD_POLICIES: tuple[FieldPolicy, ...] = (
     FieldPolicy("Comments", "Comments", "journal"),
     FieldPolicy("Change plan", "Change plan", "implementation"),
     FieldPolicy("Test plan", "Testing approach", "testing", baseline=True),
-    FieldPolicy("Risk", "Risk classification", "risk", baseline=True),
+    FieldPolicy("Risk", "Risk classification", "risk", baseline=True, missing_severity="INFO"),
     FieldPolicy("Risk and impact analysis", "Risk and impact analysis", "risk", required_when=("elevated-impact",)),
     FieldPolicy("Configuration item", "Configuration item", "technical", evidence_capable=True),
     FieldPolicy("TCS QA signoff", "TCS QA sign-off", "testing", evidence_capable=True),
     FieldPolicy("Category", "Change category", "classification", required_when=("context-required",)),
-    FieldPolicy("Sub Category", "Change sub-category", "classification", required_when=("context-required",)),
-    FieldPolicy("Conflict status", "Conflict status", "governance", required_when=("conflict-check",)),
+    FieldPolicy("Sub Category", "Change sub-category", "classification", required_when=("context-required",), missing_severity="INFO"),
+    FieldPolicy("Conflict status", "Conflict status", "governance", required_when=("conflict-check",), missing_severity="INFO"),
     FieldPolicy("Customer Approval", "Customer approval", "approval", required_when=("customer-impact",), evidence_capable=True),
     FieldPolicy("UAT signoff", "UAT sign-off", "testing", required_when=("uat",), evidence_capable=True),
     FieldPolicy("Test Results Evidence", "Test results evidence", "testing", required_when=("testing-evidence",), evidence_capable=True),
     # NOTE: "Planned start"/"Planned end" (not "...date") is what this org's ServiceNow
     # export actually calls these fields once aliased -- see input_loader.normalize_cr_record.
-    FieldPolicy("Planned start", "Planned start", "schedule", required_when=("production-change-window",)),
-    FieldPolicy("Planned end", "Planned end", "schedule", required_when=("production-change-window",)),
+    FieldPolicy("Planned start", "Planned start", "schedule", required_when=("production-change-window",), missing_severity="INFO"),
+    FieldPolicy("Planned end", "Planned end", "schedule", required_when=("production-change-window",), missing_severity="INFO"),
     # "Affected Customers" was removed as a hard FieldPolicy: measured against the
     # real 2,013-record historical export, this field is populated in only 28
     # records (1.4%) org-wide -- not just when customer-impact fires, essentially
@@ -277,7 +277,10 @@ def context_flags(cr: dict[str, Any]) -> dict[str, bool]:
         "production-technical": production and (infrastructure or database_change or network_change or functional),
         "production-change-window": production,
         "impact-detail": production and (service_restart or customer_impact or high_impact),
-        "testing-evidence": (functional and not infrastructure) or high_impact,
+        # Formal test-result evidence is a functional-change control. Infrastructure/security maintenance
+        # can still have a test plan and post-change sanity validation, but it should not become NOT READY
+        # merely because a formal evidence field is empty.
+        "testing-evidence": functional and not infrastructure,
         "context-required": True,
         "customer-approval": customer_impact,
         "conflict-check": True,
