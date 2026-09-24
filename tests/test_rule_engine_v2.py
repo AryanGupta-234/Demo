@@ -165,7 +165,8 @@ def test_infrastructure_change_does_not_require_formal_test_results_evidence():
 
     result = validate_fields(cr, Strictness.BALANCED)
     assert not any(f.code == "MISSING_TEST_RESULTS_EVIDENCE" for f in result.findings)
-    assert result.decision == Decision.PASS
+    material = [(f.code, f.severity.value, f.title) for f in result.findings if f.severity != FindingSeverity.INFO]
+    assert result.decision == Decision.PASS, material
 
 
 def test_governance_metadata_gaps_are_visible_but_do_not_change_readiness():
@@ -189,7 +190,8 @@ def test_governance_metadata_gaps_are_visible_but_do_not_change_readiness():
     }
     present = {f.code: f.severity for f in result.findings if f.code in advisory_codes}
     assert all(severity == FindingSeverity.INFO for severity in present.values())
-    assert result.decision == Decision.PASS
+    material = [(f.code, f.severity.value, f.title) for f in result.findings if f.severity != FindingSeverity.INFO]
+    assert result.decision == Decision.PASS, material
 
 
 def test_generic_security_infrastructure_language_does_not_become_functional():
