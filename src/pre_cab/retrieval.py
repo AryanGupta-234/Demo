@@ -60,7 +60,7 @@ def hybrid_retrieve(
 def build_cr_query(cr: dict[str, Any]) -> str:
     fields = (
         "Short description", "Description", "Justification",
-        "Category", "Sub Category", "Module",
+        "Category", "Sub Category", "Module", "Company",
         "Implementation plan", "Backout plan", "Test plan",
         "Risk and impact analysis",
     )
