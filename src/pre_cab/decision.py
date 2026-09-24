@@ -214,14 +214,19 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
     uat_req = _find_requirement(requirements, "UAT")
     if uat_req and uat_req.required:
         findings.append(Finding(
-            "UAT_CONTEXT", "UAT is expected for this change", FindingSeverity.INFO,
-            "Functional/customer-facing signals make UAT or equivalent validation applicable.",
+            "UAT_CONTEXT", "UAT is applicable to this change", FindingSeverity.INFO,
+            "The change profile contains functional/customer-facing signals for which UAT or equivalent acceptance validation is applicable.",
             technical_detail=uat_req.reason,
         ))
     else:
+        uat_message = (
+            "The change profile is infrastructure/technical and does not establish a customer-facing functional validation requirement."
+            if flags.get("infrastructure") and not flags.get("uat")
+            else "UAT is not established as mandatory because applicability is contextual."
+        )
         findings.append(Finding(
-            "UAT_NOT_MANDATORY", "UAT not assumed mandatory", FindingSeverity.INFO,
-            "The validator does not require UAT solely because the field exists; applicability is contextual.",
+            "UAT_NOT_MANDATORY", "UAT is not required by the change context", FindingSeverity.INFO,
+            uat_message,
             technical_detail=uat_req.reason if uat_req else "No UAT prediction was produced.",
         ))
 
