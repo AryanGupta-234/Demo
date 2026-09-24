@@ -1,6 +1,7 @@
 from pre_cab.decision import validate_fields
 from pre_cab.requirements import infer_requirements
 from pre_cab.rules import context_flags, field_policies, required_field_policies, contextual_signals
+from pre_cab.schemas import FindingSeverity
 from pre_cab.schemas import Decision, Strictness
 
 
@@ -137,3 +138,55 @@ def test_model_facing_field_sets_include_exact_required_14():
         "UAT signoff", "Customer Approval", "TCS QA signoff",
         "Test Results Evidence", "Lower Environment Reference CR/SR",
     ]
+
+
+def test_infrastructure_change_does_not_require_formal_test_results_evidence():
+    cr = base_cr(
+        **{
+            "Short description": "Microsoft Edge security update on Windows servers",
+            "Description": "Apply the Microsoft Edge security update to production Windows servers. No application outage is expected.",
+            "Justification": "Remediate a security vulnerability in the server tooling.",
+            "Category": "Infrastructure",
+            "Sub Category": "",
+            "Risk": "",
+            "Planned start": "",
+            "Planned end": "",
+            "Conflict status": "",
+            "Test plan": "Verify the installed Edge version and perform a post-change sanity check.",
+            "Test Results Evidence": "",
+        }
+    )
+    flags = context_flags(cr)
+    assert flags["infrastructure"] is True
+    assert flags["functional"] is False
+    assert flags["testing-evidence"] is False
+    required = {policy.field for policy, enabled, _ in required_field_policies(cr) if enabled}
+    assert "Test Results Evidence" not in required
+
+    result = validate_fields(cr, Strictness.BALANCED)
+    assert not any(f.code == "MISSING_TEST_RESULTS_EVIDENCE" for f in result.findings)
+    assert result.decision == Decision.PASS
+
+
+def test_governance_metadata_gaps_are_visible_but_do_not_change_readiness():
+    cr = base_cr(
+        **{
+            "Risk": "",
+            "Sub Category": "",
+            "Planned start": "",
+            "Planned end": "",
+            "Conflict status": "",
+            "Category": "Infrastructure",
+            "Short description": "Windows server maintenance",
+            "Description": "Routine production infrastructure maintenance.",
+            "Test plan": "Perform post-change health and service checks.",
+        }
+    )
+    result = validate_fields(cr, Strictness.BALANCED)
+    advisory_codes = {
+        "MISSING_RISK", "MISSING_SUB_CATEGORY", "MISSING_PLANNED_START",
+        "MISSING_PLANNED_END", "CONFLICT_UNVERIFIED",
+    }
+    present = {f.code: f.severity for f in result.findings if f.code in advisory_codes}
+    assert all(severity == FindingSeverity.INFO for severity in present.values())
+    assert result.decision == Decision.PASS
