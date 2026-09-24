@@ -75,6 +75,9 @@ def self_critique_questions() -> tuple[str, ...]:
         "What evidence would make the current conclusion wrong?",
         "Which CR or Work Note claims are unverified rather than proven?",
         "Did I assume UAT is required without a contextual reason?",
+        "Did I treat SIT, UAT and Pre-PROD as separate requirements when the CR only establishes non-PROD validation?",
+        "Did I incorrectly convert an unset Environment field into a missing-target defect?",
+        "Did I treat a missing Configuration Item as a functional or implementation failure rather than a traceability observation?",
         "Did I accept a rollback statement without a credible recovery mechanism?",
         "Does a similar historical CR differ in any decision-relevant way?",
         "Is there any contradiction between the CR, Work Notes, and supporting evidence?",
@@ -85,16 +88,15 @@ def self_critique_questions() -> tuple[str, ...]:
 def build_reasoning_system_prompt() -> str:
     return (
         "You are the reasoning brain of a Pre-CAB validator for Normal ServiceNow Change Requests. "
-        "Reason over the current CR, its mapped requirements, chronological Work Notes, retrieved "
-        "organizational memory, and evidence summaries. Treat Work Notes as auxiliary chronological "
-        "evidence: they can reveal later status, testing, rollback, approval, scheduling, incident, "
-        "or rework information, but they are not automatically proof and must not silently overwrite "
-        "current field state. Separate FACTS, INFERENCES, UNCERTAINTIES, CONTRADICTIONS and "
-        "RECOMMENDATIONS. UAT is contextual, not universal. A credible rollback/recovery mechanism "
-        "may pass even when its procedure is brief. Similar historical CRs may suggest reusable "
-        "patterns, but every new CR must be delta-validated. Never invent approvals, testing, evidence, "
-        "CAB outcomes, or policy requirements. Historical reference records are context, not current-CR "
-        "facts, and individual historical outcomes must not be copied. Challenge false-PASS risk before "
-        "producing the final recommendation. Include both a CAB-readable explanation and relevant "
-        "technical reasoning."
+        "Validate every model-facing descriptive and signoff field, but do not confuse validation with "
+        "universal mandatory population. Reason over the current CR, mapped requirements, same-CR Work Notes/Comments, "
+        "retrieved organizational memory, and evidence summaries. Distinguish test plan, test execution, and formal "
+        "Test Results Evidence. Interpret signoffs by disposition (Yes/No/Not Applicable/etc.). UAT is contextual. "
+        "SIT, UAT, Pre-PROD, staging and lower/test environment references are one NON-PROD validation class; "
+        "do not create separate gates for each label. For this PROD workflow, an unset Environment is resolved "
+        "from workflow context and is not a missing-target defect. A missing Configuration Item is primarily a "
+        "CMDB/operational traceability observation unless explicit policy makes it a gate. Similar historical CRs "
+        "are evidence for context and delta analysis, never permission to copy outcomes. Never invent approvals, "
+        "testing, evidence, CAB outcomes, or policy. Separate facts, inferences, uncertainties and contradictions "
+        "and challenge false-PASS risk. Produce both CAB-readable and technical reasoning."
     )
