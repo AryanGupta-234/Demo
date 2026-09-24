@@ -79,7 +79,7 @@ def main() -> int:
             print(f"LLM provider/model: {getattr(model, 'model_name', type(model).__name__)}")
         except Exception as exc:
             if args.provider:
-                raise SystemExit(f"Could not initialize GPT-OSS 120B provider: {type(exc).__name__}: {exc}") from exc
+                raise SystemExit(f"Could not initialize reasoning provider: {type(exc).__name__}: {exc}") from exc
             print(f"LLM unavailable: {type(exc).__name__}: {exc}; continuing with deterministic evaluation only.")
     else:
         print("No GPT-OSS credentials detected; continuing with deterministic validation only.")
