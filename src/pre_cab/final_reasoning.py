@@ -118,6 +118,21 @@ def run_final_reasoning(
     return FinalReasoningResult(reasoning, prediction, payload, None)
 
 
+def _model_has_material_signal(reasoning: FinalReasoningResult) -> bool:
+    """Require substantive model evidence before adding a new readiness penalty."""
+    if not reasoning.payload:
+        return False
+    payload = reasoning.payload
+    contradictions = payload.get("contradictions") or []
+    technical = str(payload.get("technical_reasoning") or "").lower()
+    material_terms = (
+        "rollback", "recovery", "outage", "downtime", "dependency", "security exposure",
+        "test execution", "failed", "failure", "contradiction", "approval", "implementation gap",
+        "impact mismatch", "configuration drift",
+    )
+    return bool(contradictions) or any(term in technical for term in material_terms)
+
+
 def reconcile_final_decision(
     deterministic: Decision,
     reasoning: FinalReasoningResult,
@@ -143,6 +158,12 @@ def reconcile_final_decision(
             recommendation="Retry the reasoning pass or complete human review.",
         )
     if prediction is None or _DECISION_RANK[prediction] <= _DECISION_RANK[deterministic]:
+        return deterministic, None
+
+    # A model may add a more conservative result only when it can point to a
+    # substantive contradiction or technical/readiness risk. Blank advisory
+    # metadata and unresolved-but-nonmaterial uncertainty are not sufficient.
+    if not _model_has_material_signal(reasoning):
         return deterministic, None
 
     payload = reasoning.payload or {}
