@@ -268,7 +268,17 @@ class TestingAgent(BaseAgent):
         findings: list[Finding] = []
         if not test_plan:
             findings.append(Finding("TEST_PLAN_MISSING", "Testing plan missing", FindingSeverity.WARNING, "No testing plan is populated in the CR.", recommendation="Provide an applicable test approach or documented rationale."))
-        if profile["formal_test_evidence_expected"] and not (formal_evidence_positive or execution_claimed):
+        execution_status = str(matrix.get("execution_status") or "NOT_RECORDED")
+        execution_failed = bool(matrix.get("execution_failed"))
+        if execution_failed:
+            findings.append(Finding(
+                "TEST_EXECUTION_FAILED",
+                "Recorded test/validation failure",
+                FindingSeverity.BLOCKING if profile["formal_test_evidence_expected"] else FindingSeverity.WARNING,
+                "The current CR journal contains language indicating that validation/testing failed or did not pass.",
+                recommendation="Resolve the failed validation and record a successful/reconciled result before approval.",
+            ))
+        elif profile["formal_test_evidence_expected"] and not (formal_evidence_positive or execution_claimed):
             findings.append(Finding(
                 "TEST_EXECUTION_UNCONFIRMED", "Test execution is not evidenced", FindingSeverity.WARNING,
                 "The change appears functionally relevant, but neither a positive test-evidence disposition nor execution evidence in Work Notes/Comments is recorded.",
@@ -277,15 +287,16 @@ class TestingAgent(BaseAgent):
         elif infrastructure and not execution_claimed:
             findings.append(Finding(
                 "TECHNICAL_VALIDATION_UNCONFIRMED", "Post-change validation result is not recorded", FindingSeverity.INFO,
-                "The infrastructure test approach is defined, but the reviewed CR does not yet contain a positive test-evidence disposition or explicit execution result in Work Notes/Comments.",
+                "The infrastructure test approach is defined, but the reviewed CR does not yet contain a positive execution result in Work Notes/Comments.",
                 recommendation="Record the post-change sanity-check result when executed.",
             ))
-        coverage_ok = bool(test_plan) and (not profile["formal_test_evidence_expected"] or formal_evidence_positive or execution_claimed)
+        coverage_ok = bool(test_plan) and not execution_failed and (not profile["formal_test_evidence_expected"] or formal_evidence_positive or execution_claimed)
         chain = [
             "non-PROD validation mentioned (SIT/UAT/Pre-PROD/lower environment are treated equivalently)" if flags.get("non-prod-validation") else "no non-PROD validation reference stated",
             "test plan is defined" if test_plan else "test plan is missing",
             "formal test-results evidence is recorded" if formal_evidence_positive else "formal test-results evidence is not positively recorded",
-            "execution result is supported by Work Notes/Comments" if execution_claimed else "Work Notes/Comments do not record a completed validation result",
+            f"execution status = {execution_status}",
+
             "UAT required based on change context" if (uat and uat.required) else "UAT not required based on change context",
             "functional coverage appears adequate" if coverage_ok else "functional coverage remains uncertain",
         ]
