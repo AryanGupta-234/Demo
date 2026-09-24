@@ -307,8 +307,8 @@ class RiskAgent(BaseAgent):
         confidence = 0.5 + (0.2 if risk else 0) + (0.2 if impact else 0) - (0.3 if contradiction else 0)
         confidence = round(max(0.05, min(0.95, confidence)), 2)
         findings: list[Finding] = []
-        if not risk:
-            findings.append(Finding("RISK_MISSING", "Risk classification missing", FindingSeverity.WARNING, "Risk is not populated in the CR."))
+        # Missing Risk is handled centrally by the field policy as advisory metadata.
+        # The specialist agent should not emit a second readiness-affecting finding.
         if contradiction:
             findings.append(Finding("RISK_IMPACT_CONTRADICTION", "Declared risk conflicts with impact narrative", FindingSeverity.WARNING, f"Risk is declared {risk!r} but the change context suggests elevated production impact.", technical_detail=impact[:2000], recommendation="Reconcile the declared risk level with the described impact before CAB review."))
         findings.append(Finding("RISK_CONTEXT", "Risk context captured", FindingSeverity.INFO, f"Declared risk: {risk or 'unknown'}.", technical_detail=impact[:4000]))
