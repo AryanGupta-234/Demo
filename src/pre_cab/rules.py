@@ -476,67 +476,33 @@ def _has_word(text: str, terms: Iterable[str]) -> bool:
 
 
 def context_flags(cr: dict[str, Any]) -> dict[str, bool]:
-    """Derive reusable, explainable context flags from a CR without calling an LLM."""
-    text = _blob(cr)
-    category = _text(cr.get("Category"))
-    environment = _text(cr.get("Environment"))
-
-    infrastructure = category in {"infrastructure", "infra"} or _has_any(text, (
-        "os patch", "server patch", "security patch", "patching", "reboot", "server restart",
-        "infrastructure", "storage", "middleware",
-    )) or _has_word(text, ("vm",))
-    customer_impact = _has_any(text, (
-        "customer", "payment", "transaction", "invoice", "user facing",
-        "customer-facing", "external user", "branch", "channel",
-    )) or _has_word(text, ("atm", "sms"))
-    functional = _has_any(text, (
-        "enhancement", "defect", "bug fix", "workflow", "functional", "interface",
-        "transaction", "payment", "customer", "report",
-    )) or _has_word(text, ("api",))
-    service_restart = _has_any(text, ("restart", "reboot", "downtime", "maintenance window", "unavailable", "outage"))
-    security_change = _has_any(text, (
-        "security", "vulnerability", "patch", "certificate", "credential", "firewall", "authentication",
-        "authorization", "encryption",
-    )) or _has_word(text, ("iam", "tls", "ssl"))
-    sensitive_data = _has_any(text, (
+    """Derive one consistent semantic context map from the shared change profile."""
+    profile = change_profile(cr)
+    sensitive_text = _blob(cr)
+    sensitive_data = _has_any(sensitive_text, (
         "pii", "personal data", "customer data", "sensitive data", "card data", "account data", "privacy",
     ))
-    database_change = _has_any(text, (
-        "database", "schema", "stored procedure", "migration",
-    )) or _has_word(text, ("db", "table", "index", "sql"))
-    network_change = _has_any(text, (
-        "firewall", "network", "route", "routing", "load balancer", "proxy", "dns", "connectivity",
-    )) or _has_word(text, ("port",))
-    high_impact = _has_any(text, (
-        "critical", "high impact", "major", "outage", "production outage", "payment", "transaction",
-    )) or _text(cr.get("Risk")) in {"high", "critical", "1 - high", "2 - high"}
-    production = environment in {"prod", "production", "production environment", "live"} or not environment
-
     return {
-        "infrastructure": infrastructure,
-        "customer-impact": customer_impact,
-        "functional": functional,
-        "uat": functional and customer_impact and not infrastructure,
+        "infrastructure": bool(profile["infrastructure"]),
+        "customer-impact": bool(profile["customer_facing"]),
+        "functional": bool(profile["functional"]),
+        "uat": bool(profile["functional"] and profile["customer_facing"] and not profile["infrastructure"]),
         "non-prod-validation": bool(non_prod_validation_state(cr)["claimed"]),
-        "service-restart": service_restart,
-        "security-change": security_change,
+        "service-restart": bool(profile["service_restart"]),
+        "security-change": bool(profile["security"]),
         "sensitive-data": sensitive_data,
-        "database-change": database_change,
-        "network-change": network_change,
-        "high-impact": high_impact,
-        "elevated-impact": high_impact or customer_impact,
-        "production-technical": production and (infrastructure or database_change or network_change or functional),
-        "production-change-window": production,
-        "impact-detail": production and (service_restart or customer_impact or high_impact),
-        # Formal test-result evidence is a functional-change control. Infrastructure/security maintenance
-        # can still have a test plan and post-change sanity validation, but it should not become NOT READY
-        # merely because a formal evidence field is empty.
-        "testing-evidence": functional and not infrastructure,
+        "database-change": bool(profile["database"]),
+        "network-change": bool(profile["network"]),
+        "high-impact": bool(profile["high_impact"]),
+        "elevated-impact": bool(profile["high_impact"] or profile["customer_facing"]),
+        "production-technical": bool(profile["production"] and (profile["infrastructure"] or profile["database"] or profile["network"] or profile["functional"])),
+        "production-change-window": bool(profile["production"]),
+        "impact-detail": bool(profile["production"] and (profile["service_restart"] or profile["customer_facing"] or profile["high_impact"])),
+        "testing-evidence": bool(profile["formal_test_evidence_expected"]),
         "context-required": True,
-        "customer-approval": customer_impact,
+        "customer-approval": bool(profile["approval_expected"]),
         "conflict-check": True,
     }
-
 
 def _quality(value: Any, *, field: str) -> FieldQuality:
     text = _text(value)
