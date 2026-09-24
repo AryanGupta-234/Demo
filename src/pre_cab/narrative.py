@@ -10,6 +10,7 @@ from textwrap import shorten
 from typing import Any
 
 from .schemas import Decision, FindingSeverity
+from .rules import change_profile, effective_environment
 
 _NOT_APPLICABLE_VALUES = {"", "na", "n/a", "none", "not applicable"}
 
@@ -310,6 +311,9 @@ def format_cab_result(
         "═" * 68,
         "",
         f"CR: {cr_number}",
+        f"Change type: {_text(cr.get('Type')) or 'Not recorded'}",
+        f"Change profile: {change_profile(cr).get('primary_archetype', 'GENERAL')}",
+        f"Environment: {effective_environment(cr)}",
         f"Decision: {prediction_label}",
         f"Confidence: {confidence:.0%}",
         "Validation mode: Balanced",
@@ -382,7 +386,7 @@ def format_cab_result(
             f"Non-PROD validation expected: {_mark(bool(((by_name.get('context').notes.get('change_profile') if by_name.get('context') else {}) or {}).get('non_prod_validation_expected')))}",
             f"Test execution result in Work Notes/Comments: {_mark(bool(n.get('execution_claimed')))}",
             f"  Journal evidence: {_excerpt(' '.join(str(cr.get(k) or '') for k in ('Work notes', 'Comments')), 220)}",
-            f"Formal Test Results Evidence: {_mark(bool(n.get('formal_evidence_present')))}",
+            f"Formal Test Results Evidence: {'not required by change profile' if not change_profile(cr).get('formal_test_evidence_expected') else _mark(bool(n.get('formal_evidence_present')))}",
             f"  Evidence field: {_excerpt(cr.get('Test Results Evidence'), 220)}",
             f"Functional/technical validation coverage: {_mark(bool(n.get('functional_coverage_ok')))}",
         ])
@@ -439,11 +443,11 @@ def format_cab_result(
         (bool(_is_meaningful(cr.get("Implementation plan"))), "Implementation procedure is populated"),
         (bool(_is_meaningful(cr.get("Backout plan"))), "Backout/recovery information is populated"),
         (bool(_is_meaningful(cr.get("Test plan"))), "Test plan is populated"),
-        (bool(_text(cr.get("Risk"))), "Formal risk value is present"),
         (bool(by_name.get("testing") and by_name["testing"].notes.get("functional_coverage_ok")), "Applicable validation coverage is defined"),
     ]
     for ok, label in positives:
-        lines.append(f"  {_mark(ok)} {label}")
+        if ok:
+            lines.append(f"  ✅ {label}")
 
     lines.append("")
     lines.append("Material unresolved issues:")
@@ -453,6 +457,17 @@ def format_cab_result(
             lines.append(f"  {'❌' if finding.severity == FindingSeverity.BLOCKING else '⚠️'} {finding.title}: {_excerpt(getattr(finding, 'message', ''), 240)}")
     else:
         lines.append("  None identified by deterministic validation.")
+
+    informational = [
+        f for f in findings
+        if getattr(f, "severity", FindingSeverity.INFO) == FindingSeverity.INFO
+        and getattr(f, "code", "") not in {"CHANGE_TYPE_CONTEXT", "TARGET_ENVIRONMENT_DERIVED", "UAT_NOT_MANDATORY", "TECH_SCOPE", "TESTING_CONTEXT", "RISK_CONTEXT", "DECISION_GATED"}
+    ]
+    if informational:
+        lines.append("")
+        lines.append("Informational observations:")
+        for finding in informational[:6]:
+            lines.append(f"  ℹ️ {finding.title}: {_excerpt(getattr(finding, 'message', ''), 240)}")
 
     lines.extend([
         "",
