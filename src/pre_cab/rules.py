@@ -48,6 +48,31 @@ class FieldQuality:
     reasons: tuple[str, ...]
 
 
+MODEL_DESCRIPTIVE_FIELDS: tuple[str, ...] = (
+    "Short description", "Description", "Justification", "Implementation plan",
+    "Change plan", "Backout plan", "Work notes", "Comments", "Test plan",
+)
+MODEL_SIGNOFF_FIELDS: tuple[str, ...] = (
+    "UAT signoff", "Customer Approval", "TCS QA signoff",
+    "Test Results Evidence", "Lower Environment Reference CR/SR",
+)
+WORKFLOW_DEFAULT_ENVIRONMENT = "PROD"
+NON_PROD_VALIDATION_TERMS: tuple[str, ...] = (
+    "pre-prod", "pre prod", "preprod", "non-prod", "non prod", "nonprod",
+    "uat", "sit", "staging", "lower environment", "test environment",
+)
+SIGNOFF_POSITIVE_VALUES = frozenset({
+    "yes", "y", "approved", "complete", "completed", "passed", "pass",
+    "provided", "available", "attached", "verified",
+})
+SIGNOFF_NEGATIVE_VALUES = frozenset({
+    "no", "n", "rejected", "failed", "not approved",
+})
+SIGNOFF_NOT_APPLICABLE_VALUES = frozenset({
+    "", "na", "n/a", "not applicable", "not-applicable",
+})
+
+
 # Canonical fields we have already established from the ServiceNow-normalized schema. Unknown
 # fields remain available to the model but are never made mandatory just because they exist.
 FIELD_POLICIES: tuple[FieldPolicy, ...] = (
@@ -58,11 +83,13 @@ FIELD_POLICIES: tuple[FieldPolicy, ...] = (
     FieldPolicy("Justification", "Business / operational reason", "business", baseline=True),
     FieldPolicy("Implementation plan", "Implementation approach", "implementation", baseline=True, missing_severity="BLOCKING"),
     FieldPolicy("Backout plan", "Recovery / rollback path", "recovery", baseline=True, missing_severity="BLOCKING", evidence_capable=True),
+    FieldPolicy("Work notes", "Work notes", "journal"),
+    FieldPolicy("Comments", "Comments", "journal"),
     FieldPolicy("Test plan", "Testing approach", "testing", baseline=True),
     FieldPolicy("Risk", "Risk classification", "risk", baseline=True),
     FieldPolicy("Risk and impact analysis", "Risk and impact analysis", "risk", required_when=("elevated-impact",)),
-    FieldPolicy("Configuration item", "Configuration item", "technical", required_when=("production-technical",)),
-    FieldPolicy("Environment", "Target environment", "scope", required_when=("production-technical",)),
+    FieldPolicy("Configuration item", "Configuration item", "technical", evidence_capable=True),
+    FieldPolicy("TCS QA signoff", "TCS QA sign-off", "testing", evidence_capable=True),
     FieldPolicy("Category", "Change category", "classification", required_when=("context-required",)),
     FieldPolicy("Sub Category", "Change sub-category", "classification", required_when=("context-required",)),
     FieldPolicy("Conflict status", "Conflict status", "governance", required_when=("conflict-check",)),
@@ -105,8 +132,63 @@ def _blob(cr: dict[str, Any]) -> str:
     keys = (
         "Short description", "Description", "Justification", "Risk and impact analysis",
         "Category", "Sub Category", "Configuration item", "Environment", "Service impact",
+        "Implementation plan", "Change plan", "Backout plan", "Work notes", "Comments",
+        "Test plan", "Lower Environment Reference CR/SR",
     )
     return " ".join(_text(cr.get(key)) for key in keys if _text(cr.get(key)))
+
+
+def effective_environment(cr: dict[str, Any]) -> str:
+    raw = _text(cr.get("Environment"))
+    return raw.upper() if raw else WORKFLOW_DEFAULT_ENVIRONMENT
+
+
+def non_prod_validation_state(cr: dict[str, Any]) -> dict[str, Any]:
+    fields = MODEL_DESCRIPTIVE_FIELDS + ("Lower Environment Reference CR/SR",)
+    blob = " ".join(str(cr.get(field) or "") for field in fields).lower()
+    matches = [term for term in NON_PROD_VALIDATION_TERMS if re.search(rf"\b{re.escape(term)}\b", blob)]
+    return {
+        "claimed": bool(matches),
+        "class": "NON_PROD_VALIDATION" if matches else "NOT_MENTIONED",
+        "matched_terms": list(dict.fromkeys(matches)),
+        "equivalence": "SIT/UAT/Pre-PROD/lower or test environment references are treated as one non-PROD validation class.",
+    }
+
+
+def signoff_disposition(value: Any) -> str:
+    text = _text(value)
+    if text in SIGNOFF_NOT_APPLICABLE_VALUES:
+        return "NOT_RECORDED" if not text else "NOT_APPLICABLE"
+    if text in SIGNOFF_POSITIVE_VALUES:
+        return "POSITIVE"
+    if text in SIGNOFF_NEGATIVE_VALUES:
+        return "NEGATIVE"
+    return "RECORDED_VALUE"
+
+
+def model_field_validation(cr: dict[str, Any]) -> dict[str, Any]:
+    descriptive = {}
+    for field in MODEL_DESCRIPTIVE_FIELDS:
+        value = _text(cr.get(field))
+        descriptive[field] = {
+            "status": "PRESENT" if value else "MISSING_UNSET",
+            "length": len(value),
+            "placeholder": value in {"n/a", "na", "not applicable", "unknown", "tbd", "to be decided"},
+        }
+    signoffs = {}
+    for field in MODEL_SIGNOFF_FIELDS:
+        raw = cr.get(field)
+        signoffs[field] = {
+            "value": str(raw).strip() if raw not in (None, "", [], {}) else None,
+            "disposition": signoff_disposition(raw),
+        }
+    return {
+        "descriptive": descriptive,
+        "signoffs": signoffs,
+        "effective_environment": effective_environment(cr),
+        "environment_derived": not bool(_text(cr.get("Environment"))),
+        "non_prod_validation": non_prod_validation_state(cr),
+    }
 
 
 def _has_any(text: str, terms: Iterable[str]) -> bool:
@@ -171,6 +253,7 @@ def context_flags(cr: dict[str, Any]) -> dict[str, bool]:
         "customer-impact": customer_impact,
         "functional": functional,
         "uat": functional and customer_impact and not infrastructure,
+        "non-prod-validation": bool(non_prod_validation_state(cr)["claimed"]),
         "service-restart": service_restart,
         "security-change": security_change,
         "sensitive-data": sensitive_data,
