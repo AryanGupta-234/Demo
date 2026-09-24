@@ -4,7 +4,7 @@
     "primary_type": "Normal",
     "excluded_types": ["Emergency"],
     "secondary_types": ["Standard"],
-    "note": "Emergency changes are outside the primary V1 validation scope. Standard changes are not assumed equivalent to Normal and must remain policy-scoped."
+    "note": "Emergency changes are handled through a separate emergency workflow. Standard and Normal changes may be assessed using the same evidence-aware engine when their actual change context is suitable."
   },
   "strictness": {
     "lenient": {"warning": "CONDITIONAL", "blocking": "NOT_READY"},
@@ -55,7 +55,7 @@
   },
   "hard_gates": {
     "conflict": "An unresolved reported conflict blocks readiness.",
-    "unsupported_type": "Emergency is outside V1 scope.",
+    "unsupported_type": "Emergency changes follow a separate emergency workflow.",
     "missing_recovery": "A credible recovery mechanism is required unless a documented exception is accepted.",
     "environment_contradiction": "A claim about one test environment contradicted by evidence from another environment is a blocking issue when the required environment is not proven."
   },
