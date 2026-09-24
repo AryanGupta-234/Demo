@@ -180,7 +180,9 @@ def test_governance_metadata_gaps_are_visible_but_do_not_change_readiness():
             "Conflict status": "",
             "Category": "Infrastructure",
             "Short description": "Windows server maintenance",
-            "Description": "Routine production infrastructure maintenance.",
+            "Description": "Routine production infrastructure maintenance with no customer-facing application change.",
+            "Justification": "Maintain production infrastructure; application behavior is unchanged.",
+            "Risk and impact analysis": "No customer-facing service impact is expected from this infrastructure maintenance.",
             "Test plan": "Perform post-change health and service checks.",
         }
     )
