@@ -146,6 +146,7 @@ def test_infrastructure_change_does_not_require_formal_test_results_evidence():
             "Short description": "Microsoft Edge security update on Windows servers",
             "Description": "Apply the Microsoft Edge security update to production Windows servers. No application outage is expected.",
             "Justification": "Remediate a security vulnerability in the server tooling.",
+            "Risk and impact analysis": "No application or customer-facing service change is expected; this is infrastructure maintenance.",
             "Category": "Infrastructure",
             "Sub Category": "",
             "Risk": "",
