@@ -96,7 +96,7 @@ class FieldAgent(BaseAgent):
         ]
         chain = [
             f"reviewed {len(cr)} normalized fields",
-            f"selected {len(selected)} decision-relevant fields for GPT-OSS",
+            f"selected {len(selected)} decision-relevant fields for reasoning",
             f"kept descriptive core: {', '.join(f for f in self._DESCRIPTIVE_FIELDS if f in compact) or 'none'}",
             f"included applicable signoff dispositions: {', '.join(f for f in self._SIGNOFF_FIELDS if f in compact) or 'none'}",
         ]
