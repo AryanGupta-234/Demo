@@ -140,6 +140,8 @@ class ContextAgent(BaseAgent):
             )
         ]
         for signal in contradictions:
+            if signal["code"] in {"RISK_IMPACT_CONTRADICTION", "FUNCTIONAL_TESTING_GAP"}:
+                continue  # owned by the specialist agent for this domain
             findings.append(Finding(
                 signal["code"], "Context contradiction detected", FindingSeverity.WARNING,
                 signal["message"], recommendation="Reconcile the conflicting statements before CAB review.",
