@@ -13,6 +13,7 @@ from .memory import MemoryKind, UnifiedMemory
 from .models import ModelProvider, ModelResponse
 from .retrieval import build_cr_query
 from .sanitization import sanitize_cr_for_reasoning, sanitize_value
+from .rules import effective_environment, model_field_validation, non_prod_validation_state
 from .schemas import AgentContext, Finding
 
 _JSON_OBJECT_FORMAT = {"type": "json_object"}
@@ -160,6 +161,13 @@ class AgenticReasoningLoop:
         payload["work_notes"] = journal.get("work_notes")
         payload["comments"] = journal.get("comments")
         payload["journal_context"] = journal
+        payload["model_field_validation"] = model_field_validation(context.cr)
+        payload["workflow_context"] = {
+            "effective_environment": effective_environment(context.cr),
+            "environment_is_derived_when_unset": not bool(str(context.cr.get("Environment") or "").strip()),
+            "change_workflow_target": "PROD",
+            "non_prod_validation": non_prod_validation_state(context.cr),
+        }
         payload["work_notes_policy"] = {
             "same_cr_only": True,
             "role": "chronological auxiliary evidence from this CR",
@@ -211,17 +219,20 @@ class AgenticReasoningLoop:
             "uncertainties": "array of unresolved items",
             "contradictions": "array of detected inconsistencies",
             "technical_reasoning": (
-                "substantive technical assessment for an engineer: name the specific fields/evidence "
-                "checked, what they showed, and why that does or doesn't support readiness — concrete "
-                "enough that a reviewer could verify it against the CR record."
+                "substantive technical assessment for an engineer: name the specific fields/evidence checked, "
+                "what they showed, and why that does or does not support readiness. Distinguish implementation, "
+                "rollback, CI traceability, testing execution, formal evidence, dependencies and environment context."
             ),
             "cab_reasoning": (
-                "plain-language CAB decision rationale for a non-technical business reviewer: no jargon, "
-                "explain in terms of business/operational impact and what's missing or satisfied — this is "
-                "the FIRST thing a reviewer reads, so it must stand alone and make the decision clear "
-                "without requiring the technical_reasoning field to make sense."
+                "plain-language CAB decision rationale for a non-technical reviewer: explain business/operational "
+                "impact, what evidence supports the change, and what genuinely needs attention. Do not present "
+                "a derived PROD environment, contextual N/A, or CI traceability observation as a missing control."
             ),
-            "cab_questions": "array of up to 4 useful CAB questions",
+            "cab_questions": (
+                "array of up to 4 useful CAB questions. Ask only about genuine unresolved evidence, execution, "
+                "rollback, dependencies, impact or contradictions; do not ask for UAT/pre-PROD merely because "
+                "those fields exist, especially for infrastructure changes."
+            ),
             "recommendations": "array of up to 4 concrete next actions",
             "self_critique": (
                 "array of concise answers to the self_critique_questions above — actually answer each "
@@ -237,7 +248,9 @@ class AgenticReasoningLoop:
             "Comments are chronological journal evidence from this SAME CR. Never let a later journal entry silently overwrite "
             "current structured fields. UAT is contextual. Rollback must be credible. Never invent approvals, testing, evidence, "
             "history, or policy. Separate facts, inferences, uncertainties and contradictions and challenge false-PASS risk. "
-            "cab_reasoning and technical_reasoning serve two different readers and are shown to both together — write "
+            "Treat SIT/UAT/Pre-PROD/lower-environment references as one non-PROD validation class, do not report an unset "
+            "Environment as missing in this PROD workflow, and keep missing CI as traceability unless explicitly gated. "
+            "Validate all 14 model-facing fields even when some are legitimately unset or Not Applicable. cab_reasoning and technical_reasoning serve two different readers and are shown to both together — write "
             "cab_reasoning so a non-technical CAB member understands the decision and its business impact on its own, and "
             "write technical_reasoning so an engineer gets the specific field-level evidence behind it; do not make one "
             "depend on the other to be understood."
