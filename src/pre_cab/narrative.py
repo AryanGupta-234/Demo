@@ -183,6 +183,8 @@ def _evidence_snapshot(cr: dict[str, Any]) -> list[str]:
         ("Implementation plan", cr.get("Implementation plan")),
         ("Change plan", cr.get("Change plan")),
         ("Backout plan", cr.get("Backout plan")),
+        ("Work notes", cr.get("Work notes")),
+        ("Comments", cr.get("Comments")),
         ("Test plan", cr.get("Test plan")),
         ("Configuration item", cr.get("Configuration item")),
         ("Risk", cr.get("Risk")),
@@ -199,7 +201,7 @@ def _signoff_snapshot(cr: dict[str, Any]) -> list[str]:
         "UAT signoff", "Customer Approval", "TCS QA signoff",
         "Test Results Evidence", "Lower Environment Reference CR/SR",
     )
-    return [f"{field:<33} {_text(cr.get(field)) or 'Not populated'}" for field in fields]
+    return [f"{field:<33} {_text(cr.get(field)) or 'Not recorded'}" for field in fields]
 
 
 def _agent_detail(agent_results: list[Any]) -> list[str]:
@@ -234,16 +236,18 @@ def _cab_questions(cr: dict[str, Any], agent_results: list[Any], brain_payload: 
     questions: list[str] = []
     if not _text(cr.get("Configuration item")):
         questions.append("Which production Configuration Item(s) are actually being changed?")
-    if testing and not testing.notes.get("pre_prod_claimed"):
-        questions.append("What pre-PROD validation was completed, in which environment, and with what result?")
-    if testing and not testing.notes.get("evidence_present"):
-        questions.append("Where is the execution evidence proving the planned tests completed successfully?")
+    if testing and testing.notes.get("functional_coverage_ok") is False:
+        questions.append("What validation is still needed to demonstrate the intended outcome?")
+    elif testing and not testing.notes.get("execution_claimed") and not testing.notes.get("formal_evidence_present"):
+        questions.append("When the planned validation is executed, where will the result be recorded?")
     if risk and not _text(cr.get("Risk")):
         questions.append("What is the formal risk classification and who assessed it?")
     if technical and not technical.notes.get("rollback_aligned"):
         questions.append("What is the exact rollback trigger, procedure, and recovery validation?")
-    if not _is_meaningful(cr.get("Change plan")):
-        questions.append("What dependency/change sequencing information is required for implementation?")
+    if not _is_meaningful(cr.get("Change plan")) and not (
+        technical and technical.notes.get("dependency_evidence_present")
+    ):
+        questions.append("Is there any dependency or sequencing detail that the implementation team must coordinate?")
     return questions[:6] or ["Are there any residual operational risks or dependencies not captured in the CR?"]
 
 
@@ -338,11 +342,14 @@ def format_cab_result(
         lines.extend([
             f"Implementation: {_mark(bool(_is_meaningful(cr.get('Implementation plan'))))}",
             f"  Evidence: {_excerpt(cr.get('Implementation plan'), 260)}",
-            f"Configuration item: {_mark(bool(_text(cr.get('Configuration item'))))}",
+            f"Configuration item: {'✅ Identified' if _text(cr.get('Configuration item')) else '⚠️ Not identified (traceability observation)'}",
             f"  Value: {_text(cr.get('Configuration item')) or 'Not identified'}",
+            f"Target environment: {n.get('effective_environment') or ('PROD' if not _text(cr.get('Environment')) else _text(cr.get('Environment')))}",
             f"Rollback/recovery: {_mark(bool(n.get('rollback_aligned')))}",
             f"  Assessment: {_excerpt(n.get('rollback_reason') or cr.get('Backout plan'), 260)}",
-            f"Dependency/lower-environment evidence: {_mark(dependency_evidence)}",
+            f"Non-PROD validation context: {_mark(bool(n.get('non_prod_validation_claimed')))}",
+            "  SIT/UAT/Pre-PROD/lower environment are treated as one validation class",
+            f"Dependency/sequencing context: {_mark(bool(n.get('dependency_evidence_present')))}",
             f"Technical uncertainty: {_text(n.get('technical_uncertainty')).upper() or 'UNKNOWN'}",
         ])
     else:
@@ -360,10 +367,12 @@ def format_cab_result(
         lines.extend([
             f"Test plan: {_mark(_is_meaningful(cr.get('Test plan')))}",
             f"  Evidence: {_excerpt(cr.get('Test plan'), 260)}",
-            f"Pre-PROD validation stated: {_mark(bool(n.get('pre_prod_claimed')))}",
-            f"Test execution evidence: {_mark(bool(n.get('evidence_present')))}",
+            f"Non-PROD validation stated (SIT/UAT/Pre-PROD): {_mark(bool(n.get('non_prod_validation_claimed')))}",
+            f"Test execution result in Work Notes/Comments: {_mark(bool(n.get('execution_claimed')))}",
+            f"  Journal evidence: {_excerpt(' '.join(str(cr.get(k) or '') for k in ('Work notes', 'Comments')), 220)}",
+            f"Formal Test Results Evidence: {_mark(bool(n.get('formal_evidence_present')))}",
             f"  Evidence field: {_excerpt(cr.get('Test Results Evidence'), 220)}",
-            f"Functional coverage: {_mark(bool(n.get('functional_coverage_ok')))}",
+            f"Functional/technical validation coverage: {_mark(bool(n.get('functional_coverage_ok')))}",
         ])
     else:
         lines.append("Testing agent output was not available.")
@@ -418,8 +427,8 @@ def format_cab_result(
         (bool(_is_meaningful(cr.get("Implementation plan"))), "Implementation procedure is populated"),
         (bool(_is_meaningful(cr.get("Backout plan"))), "Backout/recovery information is populated"),
         (bool(_is_meaningful(cr.get("Test plan"))), "Test plan is populated"),
-        (bool(_text(cr.get("Configuration item"))), "Configuration Item is identified"),
         (bool(_text(cr.get("Risk"))), "Formal risk value is present"),
+        (bool(by_name.get("testing") and by_name["testing"].notes.get("functional_coverage_ok")), "Applicable validation coverage is defined"),
     ]
     for ok, label in positives:
         lines.append(f"  {_mark(ok)} {label}")
