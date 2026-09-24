@@ -81,3 +81,59 @@ def test_rule_engine_exposes_explainable_context_to_requirements():
     assert "Implementation plan" in names
     assert "UAT signoff" in names
     assert any(prediction.name == "UAT" and prediction.required for prediction in predictions)
+
+
+def test_prod_workflow_derives_unset_environment_without_missing_target_warning():
+    cr = base_cr(
+        **{
+            "Environment": "",
+            "Category": "Infrastructure",
+            "Short description": "Monthly Windows OS security patch",
+            "Description": "Apply monthly security patches and reboot production management servers.",
+        }
+    )
+    result = validate_fields(cr, Strictness.BALANCED)
+    assert not any(f.code == "MISSING_ENVIRONMENT" for f in result.findings)
+    assert any(f.code == "TARGET_ENVIRONMENT_DERIVED" for f in result.findings)
+
+
+def test_missing_ci_is_traceability_observation_not_technical_blocker():
+    cr = base_cr(**{"Configuration item": "", "Category": "Infrastructure"})
+    result = validate_fields(cr, Strictness.BALANCED)
+    finding = next(f for f in result.findings if f.code == "CONFIGURATION_TRACEABILITY")
+    assert finding.severity == FindingSeverity.INFO
+    assert not any(f.code == "MISSING_CONFIGURATION_ITEM" for f in result.findings)
+
+
+def test_non_prod_validation_treats_uat_sit_and_preprod_as_equivalent():
+    base = base_cr(**{
+        "Category": "Infrastructure",
+        "Short description": "Server maintenance",
+        "Description": "Infrastructure maintenance change.",
+    })
+    for phrase in ("tested in UAT", "tested in SIT", "tested in Pre-PROD", "validated in lower environment"):
+        cr = dict(base)
+        cr["Test plan"] = phrase
+        flags = context_flags(cr)
+        assert flags["non-prod-validation"] is True
+
+
+def test_non_prod_environment_mention_without_testing_is_not_validation_claim():
+    cr = base_cr(**{
+        "Category": "Infrastructure",
+        "Justification": "There are no Windows servers present in Non-Prod environment.",
+        "Test plan": "Validate production server health after patching.",
+    })
+    assert context_flags(cr)["non-prod-validation"] is False
+
+
+def test_model_facing_field_sets_include_exact_required_14():
+    from pre_cab.rules import MODEL_DESCRIPTIVE_FIELDS, MODEL_SIGNOFF_FIELDS
+    assert list(MODEL_DESCRIPTIVE_FIELDS) == [
+        "Short description", "Description", "Justification", "Implementation plan",
+        "Change plan", "Backout plan", "Work notes", "Comments", "Test plan",
+    ]
+    assert list(MODEL_SIGNOFF_FIELDS) == [
+        "UAT signoff", "Customer Approval", "TCS QA signoff",
+        "Test Results Evidence", "Lower Environment Reference CR/SR",
+    ]
