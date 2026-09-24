@@ -196,7 +196,13 @@ class TechnicalAgent(BaseAgent):
             f"target environment resolved as {effective_environment(cr)}" + (" from workflow context" if not str(cr.get("Environment") or "").strip() else ""),
             "rollback mechanism aligns with implementation" if rollback_aligned else "rollback mechanism could not be correlated with implementation",
             "non-PROD validation reference found (SIT/UAT/Pre-PROD/lower environment treated equivalently)" if flags.get("non-prod-validation") else "no non-PROD validation reference stated",
-            "dependency/sequencing context is present" if dependency_evidence_present else "dependency/sequencing context is not explicitly stated",
+            "dependency/sequencing context is present"
+            if dependency_evidence_present
+            else (
+                "no unresolved dependency signal identified"
+                if not flags.get("high-impact") and not flags.get("database-change") and not flags.get("network-change")
+                else "dependency/sequencing context is not explicitly stated"
+            ),
             f"{uncertainty} technical uncertainty",
         ]
         finding = Finding("TECH_SCOPE", "Technical scope extracted", FindingSeverity.INFO, "Technical implementation scope has been captured for deeper review.", technical_detail=f"CI={ci!r}; implementation={implementation[:2500]}; backout={backout[:1500]}")
@@ -296,7 +302,13 @@ class TestingAgent(BaseAgent):
         chain = [
             "non-PROD validation mentioned (SIT/UAT/Pre-PROD/lower environment are treated equivalently)" if flags.get("non-prod-validation") else "no non-PROD validation reference stated",
             "test plan is defined" if test_plan else "test plan is missing",
-            "formal test-results evidence is recorded" if formal_evidence_positive else "formal test-results evidence is not positively recorded",
+            (
+                "formal test-results evidence is recorded"
+                if formal_evidence_positive
+                else "formal test-results evidence is not recorded"
+                if profile["formal_test_evidence_expected"]
+                else "formal test-results evidence is not required for this change profile"
+            ),
             f"execution status = {execution_status}",
 
             "UAT required based on change context" if (uat and uat.required) else "UAT not required based on change context",
