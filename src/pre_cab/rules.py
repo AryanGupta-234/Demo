@@ -85,6 +85,7 @@ FIELD_POLICIES: tuple[FieldPolicy, ...] = (
     FieldPolicy("Backout plan", "Recovery / rollback path", "recovery", baseline=True, missing_severity="BLOCKING", evidence_capable=True),
     FieldPolicy("Work notes", "Work notes", "journal"),
     FieldPolicy("Comments", "Comments", "journal"),
+    FieldPolicy("Change plan", "Change plan", "implementation"),
     FieldPolicy("Test plan", "Testing approach", "testing", baseline=True),
     FieldPolicy("Risk", "Risk classification", "risk", baseline=True),
     FieldPolicy("Risk and impact analysis", "Risk and impact analysis", "risk", required_when=("elevated-impact",)),
@@ -145,13 +146,25 @@ def effective_environment(cr: dict[str, Any]) -> str:
 
 def non_prod_validation_state(cr: dict[str, Any]) -> dict[str, Any]:
     fields = MODEL_DESCRIPTIVE_FIELDS + ("Lower Environment Reference CR/SR",)
-    blob = " ".join(str(cr.get(field) or "") for field in fields).lower()
-    matches = [term for term in NON_PROD_VALIDATION_TERMS if re.search(rf"\b{re.escape(term)}\b", blob)]
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", " ".join(str(cr.get(field) or "") for field in fields).lower())
+    validation_terms = ("test", "tested", "testing", "validate", "validated", "validation", "sanity", "verified", "verification", "success", "successful")
+    matches: list[str] = []
+    for sentence in sentences:
+        env_terms = [term for term in NON_PROD_VALIDATION_TERMS if re.search(rf"\b{re.escape(term)}\b", sentence)]
+        if not env_terms:
+            continue
+        if any(term in sentence for term in validation_terms):
+            matches.extend(env_terms)
+    # An explicit lower-environment reference can itself establish the validation class,
+    # except when the field is explicitly No/NA.
+    ref = _text(cr.get("Lower Environment Reference CR/SR"))
+    if ref and ref not in {"no", "na", "n/a", "not applicable"}:
+        matches.append("lower environment reference")
     return {
         "claimed": bool(matches),
         "class": "NON_PROD_VALIDATION" if matches else "NOT_MENTIONED",
         "matched_terms": list(dict.fromkeys(matches)),
-        "equivalence": "SIT/UAT/Pre-PROD/lower or test environment references are treated as one non-PROD validation class.",
+        "equivalence": "SIT/UAT/Pre-PROD/lower or test environment references are treated as one non-PROD validation class when explicitly described as validation/testing.",
     }
 
 
