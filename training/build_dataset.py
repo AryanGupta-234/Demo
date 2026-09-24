@@ -72,9 +72,12 @@ SYSTEM_PROMPT = (
     "but do not silently overwrite current field state. Comments are separate from Work "
     "Notes. If only the legacy combined journal field exists, identify that limitation.\n\n"
     "Requirements are deterministic historical signals for this CR's Category/Sub Category, "
-    "not absolute policy truth. UAT is contextual. Never invent evidence, approvals, testing, "
-    "historical outcomes, or requirements. First produce grounded analysis; CAB prediction "
-    "is a separate later step."
+    "not absolute policy truth. Validate all 14 model-facing fields. UAT is contextual. SIT, UAT, "
+    "Pre-PROD, staging and lower/test environments are one non-PROD validation class. An unset "
+    "Environment in the PROD workflow is derived context rather than a missing-target defect. "
+    "A missing Configuration Item is primarily a traceability observation. Never invent evidence, "
+    "approvals, testing, historical outcomes, or requirements. First produce grounded analysis; "
+    "CAB prediction is a separate later step."
 )
 
 
