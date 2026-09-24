@@ -35,14 +35,17 @@ def change_similarity(current: dict[str, Any], historical: dict[str, Any]) -> fl
     not artificially reduce an otherwise strong semantic match.
     """
     weights = {
-        "Type": 0.05,
-        "Category": 0.15,
-        "Sub Category": 0.10,
-        "Short description": 0.25,
-        "Description": 0.15,
-        "Implementation plan": 0.15,
-        "Configuration item": 0.10,
-        "Company": 0.05,
+        "Type": 0.04,
+        "Category": 0.10,
+        "Sub Category": 0.07,
+        "Short description": 0.22,
+        "Description": 0.10,
+        "Justification": 0.13,
+        "Implementation plan": 0.12,
+        "Backout plan": 0.07,
+        "Test plan": 0.06,
+        "Configuration item": 0.03,
+        "Company": 0.06,
     }
     total = 0.0
     score = 0.0
@@ -69,8 +72,11 @@ def clone_analysis(current: dict[str, Any], historical: dict[str, Any], similari
         cab_recommendation=str(historical.get("CAB recommendation") or "") or None,
     )
     compare_fields = (
-        "Category", "Sub Category", "Implementation plan", "Test plan", "Backout plan",
-        "Customer Approval", "Risk", "Configuration item",
+        "Category", "Sub Category", "Description", "Justification",
+        "Implementation plan", "Change plan", "Test plan", "Backout plan",
+        "Customer Approval", "UAT signoff", "TCS QA signoff",
+        "Test Results Evidence", "Lower Environment Reference CR/SR",
+        "Risk", "Configuration item",
     )
     reusable: list[str] = []
     changed: list[str] = []
@@ -84,7 +90,13 @@ def clone_analysis(current: dict[str, Any], historical: dict[str, Any], similari
         else:
             changed.append(field)
 
-    revalidation = tuple(changed)
+    revalidation = list(changed)
+    for field in ("Work notes", "Comments", "UAT signoff", "Customer Approval", "TCS QA signoff", "Test Results Evidence", "Lower Environment Reference CR/SR"):
+        a = str(current.get(field) or "").strip()
+        b = str(historical.get(field) or "").strip()
+        if a and a != b and field not in revalidation:
+            revalidation.append(field)
+    revalidation = tuple(dict.fromkeys(revalidation))
     if sim >= 0.90:
         recommendation = "CLONE_CANDIDATE"
     elif sim >= 0.75:
