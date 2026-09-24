@@ -88,12 +88,32 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
     score = 100.0
 
     change_type = classify_change(cr)
-    if change_type != "normal":
+    if not change_type:
         findings.append(Finding(
-            "OUT_OF_SCOPE", "Change type out of V1 scope", FindingSeverity.BLOCKING,
-            "V1 validates Normal CRs; this request is not Normal.",
+            "CHANGE_TYPE_UNSET",
+            "Change type is not recorded",
+            FindingSeverity.WARNING,
+            "The CR does not provide a recognizable change type. The substantive technical and operational review will continue, but the change classification should be confirmed.",
+            technical_detail="Type field is blank or unavailable.",
+            recommendation="Confirm and record the applicable ServiceNow change type.",
+        ))
+    elif change_type == "emergency":
+        # Emergency records are normally filtered by the entry point, but when one
+        # reaches the validator directly it must remain explicitly identifiable.
+        findings.append(Finding(
+            "CHANGE_TYPE_EMERGENCY",
+            "Emergency change type identified",
+            FindingSeverity.INFO,
+            "The CR is identified as an Emergency change. Emergency handling is a routing/workflow consideration, not a reason to pretend the technical content was not evaluated.",
             technical_detail=f"Type={_text(cr.get('Type'))!r}",
-            recommendation="Route the CR through the appropriate change process.",
+        ))
+    else:
+        findings.append(Finding(
+            "CHANGE_TYPE_CONTEXT",
+            "Change type identified",
+            FindingSeverity.INFO,
+            "The recorded change type is treated as context; readiness is determined from the change's actual technical, operational, testing and approval evidence.",
+            technical_detail=f"Type={_text(cr.get('Type'))!r}; normalized={change_type!r}",
         ))
 
     policies = required_field_policies(cr)
