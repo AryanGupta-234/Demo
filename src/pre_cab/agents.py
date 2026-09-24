@@ -176,7 +176,23 @@ class TechnicalAgent(BaseAgent):
             f"{uncertainty} technical uncertainty",
         ]
         finding = Finding("TECH_SCOPE", "Technical scope extracted", FindingSeverity.INFO, "Technical implementation scope has been captured for deeper review.", technical_detail=f"CI={ci!r}; implementation={implementation[:2500]}; backout={backout[:1500]}")
-        return AgentResult(self.name, [finding], [], {"implementation_length": len(implementation), "backout_length": len(backout), "ci": ci, "chain": chain, "technical_uncertainty": uncertainty, "rollback_aligned": rollback_aligned, "rollback_reason": rollback_reason})
+        return AgentResult(
+            self.name,
+            [finding],
+            [],
+            {
+                "implementation_length": len(implementation),
+                "backout_length": len(backout),
+                "ci": ci,
+                "chain": chain,
+                "technical_uncertainty": uncertainty,
+                "rollback_aligned": rollback_aligned,
+                "rollback_reason": rollback_reason,
+                "dependency_evidence_present": dependency_evidence_present,
+                "non_prod_validation_claimed": bool(flags.get("non-prod-validation")),
+                "effective_environment": effective_environment(cr),
+            },
+        )
 
 
 class BusinessImpactAgent(BaseAgent):
