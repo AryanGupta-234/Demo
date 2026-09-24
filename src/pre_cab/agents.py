@@ -180,11 +180,13 @@ class TechnicalAgent(BaseAgent):
         rollback_ok, rollback_reason, _explicit_na = rollback_quality(backout)
         rollback_aligned = rollback_ok and implementation_present
         operational_context = " ".join(str(cr.get(k) or "") for k in (
-            "Description", "Justification", "Implementation plan", "Change plan",
-            "Backout plan", "Work notes", "Comments", "Test plan",
+            "Description", "Implementation plan", "Change plan", "Work notes", "Comments",
         )).lower()
-        dependency_terms = ("dependency", "dependencies", "sequence", "sequencing", "before", "after", "prerequisite")
-        # Non-PROD testing is evidence of validation, not evidence of dependency/sequencing.
+        dependency_terms = (
+            "dependency", "dependencies", "sequence", "sequencing", "prerequisite",
+            "depends on", "blocked by", "coordinate with", "coordination with",
+        )
+        # Non-PROD testing and temporal words inside a test plan are not dependency evidence.
         dependency_evidence_present = bool(change_plan) or any(term in operational_context for term in dependency_terms)
         present_signals = sum([implementation_present, rollback_ok, bool(test_plan), dependency_evidence_present])
         uncertainty = "low" if present_signals >= 3 else ("medium" if present_signals >= 2 else "high")
