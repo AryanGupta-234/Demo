@@ -277,7 +277,7 @@ def context_flags(cr: dict[str, Any]) -> dict[str, bool]:
         "production-technical": production and (infrastructure or database_change or network_change or functional),
         "production-change-window": production,
         "impact-detail": production and (service_restart or customer_impact or high_impact),
-        "testing-evidence": functional or customer_impact or high_impact,
+        "testing-evidence": (functional and not infrastructure) or high_impact,
         "context-required": True,
         "customer-approval": customer_impact,
         "conflict-check": True,
