@@ -283,7 +283,8 @@ def change_profile(cr: dict[str, Any]) -> dict[str, Any]:
     customer_score, customer_hits = _score_signal(
         text,
         ("customer-facing", "customer facing", "external user", "customer impact", "customer transaction",
-         "payment processing", "branch transaction", "end-user", "end user"),
+         "payment processing", "branch transaction", "end-user", "end user", "customer sms",
+         "sms notification", "customer notification", "customer message"),
         negative=("no", "without", "not"),
     )
     security_score, security_hits = _score_signal(
