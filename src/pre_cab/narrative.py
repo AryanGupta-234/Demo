@@ -338,7 +338,6 @@ def format_cab_result(
     technical = by_name.get("technical")
     if technical:
         n = technical.notes
-        dependency_evidence = bool(n.notes.get("dependency_evidence_present"))
         lines.extend([
             f"Implementation: {_mark(bool(_is_meaningful(cr.get('Implementation plan'))))}",
             f"  Evidence: {_excerpt(cr.get('Implementation plan'), 260)}",
