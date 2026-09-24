@@ -359,7 +359,20 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
     warnings = [f for f in findings if f.severity == FindingSeverity.WARNING]
     decision = Decision.NOT_READY if blocking else (Decision.CONDITIONAL if warnings else Decision.PASS)
     score = max(0.0, min(100.0, score))
-    confidence = max(0.50, min(0.99, 0.72 + (score / 100.0) * 0.26 - len(warnings) * 0.015))
+
+    # Calibrate confidence to the actual decision state. A high raw checklist score must
+    # not produce 98% confidence when material warnings remain, and an informational
+    # observation should not cause a disproportionate confidence collapse.
+    confidence = 0.60 + (score / 100.0) * 0.32
+    confidence -= len(warnings) * 0.035
+    confidence -= len(blocking) * 0.04
+    if decision == Decision.NOT_READY:
+        confidence = min(confidence, 0.94)
+    elif decision == Decision.CONDITIONAL:
+        confidence = min(confidence, 0.90)
+    else:
+        confidence = min(confidence, 0.95)
+    confidence = max(0.50, min(0.95, confidence))
 
     return ValidationResult(
         decision=decision,
