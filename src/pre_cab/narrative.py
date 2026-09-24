@@ -79,8 +79,13 @@ def _checklist(
     rollback_aligned = bool(technical and technical.notes.get("rollback_aligned"))
     items.append((rollback_aligned, "Recovery/rollback path identified" if rollback_aligned else "Recovery/rollback path not confirmed"))
 
+    profile = (by_name.get("context").notes.get("change_profile") if by_name.get("context") else None) or {}
+    non_prod_expected = bool(profile.get("non_prod_validation_expected"))
     pre_prod = bool(testing and testing.notes.get("pre_prod_claimed"))
-    items.append((pre_prod, "Pre-PROD testing stated" if pre_prod else "No pre-PROD testing stated"))
+    if non_prod_expected:
+        items.append((pre_prod, "Non-PROD validation stated" if pre_prod else "Non-PROD validation not confirmed"))
+    else:
+        items.append((True, "Non-PROD validation not mandatory for this change context"))
 
     test_plan = _is_meaningful(cr.get("Test plan"))
     items.append((test_plan, "Test plan present" if test_plan else "Test plan missing"))
@@ -369,7 +374,9 @@ def format_cab_result(
         lines.extend([
             f"Test plan: {_mark(_is_meaningful(cr.get('Test plan')))}",
             f"  Evidence: {_excerpt(cr.get('Test plan'), 260)}",
-            f"Non-PROD validation stated (SIT/UAT/Pre-PROD): {_mark(bool(n.get('non_prod_validation_claimed')))}",
+            f"Change profile: {((by_name.get('context').notes.get('change_profile') if by_name.get('context') else {}) or {}).get('primary_archetype', 'GENERAL')}",
+            f"Formal test-results evidence applicable: {_mark(bool(((by_name.get('context').notes.get('change_profile') if by_name.get('context') else {}) or {}).get('formal_test_evidence_expected')))}",
+            f"Non-PROD validation expected: {_mark(bool(((by_name.get('context').notes.get('change_profile') if by_name.get('context') else {}) or {}).get('non_prod_validation_expected')))}",
             f"Test execution result in Work Notes/Comments: {_mark(bool(n.get('execution_claimed')))}",
             f"  Journal evidence: {_excerpt(' '.join(str(cr.get(k) or '') for k in ('Work notes', 'Comments')), 220)}",
             f"Formal Test Results Evidence: {_mark(bool(n.get('formal_evidence_present')))}",
