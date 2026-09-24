@@ -139,23 +139,24 @@ def reconcile_final_decision(
 ) -> tuple[Decision, Finding | None]:
     prediction = reasoning.model_prediction
     if reasoning.error:
-        decision = Decision.CONDITIONAL if deterministic == Decision.PASS else deterministic
-        return decision, Finding(
+        # Model availability must never turn a technically valid deterministic
+        # assessment into CONDITIONAL. The report should disclose the limitation,
+        # but readiness remains governed by the actual CR findings.
+        return deterministic, Finding(
             code="FINAL_REASONING_UNAVAILABLE",
-            title="Final GPT reasoning incomplete",
-            severity=FindingSeverity.WARNING,
-            message="Field/evidence validation completed, but the final GPT-OSS reasoning pass failed.",
+            title="Supplementary reasoning unavailable",
+            severity=FindingSeverity.INFO,
+            message="The primary change validation completed, but the optional reasoning pass was unavailable.",
             technical_detail=reasoning.error,
-            recommendation="Retry the reasoning provider or complete human review.",
+            recommendation="A later reasoning pass may add context; no readiness change is made from this condition.",
         )
     if reasoning.reasoning is not None and reasoning.payload is None:
-        decision = Decision.CONDITIONAL if deterministic == Decision.PASS else deterministic
-        return decision, Finding(
+        return deterministic, Finding(
             code="FINAL_REASONING_INVALID",
-            title="Final GPT reasoning output invalid",
-            severity=FindingSeverity.WARNING,
-            message="GPT-OSS responded, but the final structured assessment could not be validated.",
-            recommendation="Retry the reasoning pass or complete human review.",
+            title="Supplementary reasoning response unusable",
+            severity=FindingSeverity.INFO,
+            message="The primary change validation completed, but the supplementary reasoning response could not be validated.",
+            recommendation="A later reasoning pass may add context; no readiness change is made from this condition.",
         )
     if prediction is None or _DECISION_RANK[prediction] <= _DECISION_RANK[deterministic]:
         return deterministic, None
