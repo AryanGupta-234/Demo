@@ -190,3 +190,65 @@ def test_governance_metadata_gaps_are_visible_but_do_not_change_readiness():
     present = {f.code: f.severity for f in result.findings if f.code in advisory_codes}
     assert all(severity == FindingSeverity.INFO for severity in present.values())
     assert result.decision == Decision.PASS
+
+
+def test_generic_security_infrastructure_language_does_not_become_functional():
+    cr = base_cr(
+        **{
+            "Category": "Infrastructure",
+            "Sub Category": "OS Patching",
+            "Short description": "Security update for production servers",
+            "Description": "Apply a critical security patch to Windows servers. The application remains unchanged.",
+            "Justification": "Remediate a vulnerability.",
+            "Test plan": "Verify service health and installed patch version after maintenance.",
+            "Risk": "",
+            "Test Results Evidence": "",
+        }
+    )
+    from pre_cab.rules import change_profile
+    profile = change_profile(cr)
+    assert profile["infrastructure"] is True
+    assert profile["security"] is True
+    assert profile["functional"] is False
+    assert profile["formal_test_evidence_expected"] is False
+
+
+def test_non_prod_validation_is_not_dependency_evidence():
+    cr = base_cr(
+        **{
+            "Category": "Infrastructure",
+            "Sub Category": "OS Patching",
+            "Change plan": "",
+            "Test plan": "Tested in SIT before the production patch.",
+            "Description": "Apply the server patch in production.",
+            "Short description": "Production server patch",
+        }
+    )
+    from pre_cab.agents import TechnicalAgent
+    from pre_cab.schemas import AgentContext
+    result = TechnicalAgent().run(AgentContext(cr=cr))
+    assert result.notes["non_prod_validation_claimed"] is True
+    assert result.notes["dependency_evidence_present"] is False
+
+
+def test_historical_field_layer_does_not_reintroduce_metadata_warnings():
+    cr = base_cr(
+        **{
+            "Risk": "",
+            "Sub Category": "",
+            "Planned start": "",
+            "Planned end": "",
+            "Conflict status": "",
+            "Category": "Infrastructure",
+            "Short description": "Production server maintenance",
+            "Description": "Routine infrastructure maintenance.",
+            "Test plan": "Verify server health after maintenance.",
+        }
+    )
+    result = validate_fields(cr, Strictness.BALANCED)
+    forbidden = {
+        "HISTORICAL_GAP_RISK", "HISTORICAL_GAP_SUB_CATEGORY",
+        "HISTORICAL_GAP_PLANNED_START", "HISTORICAL_GAP_PLANNED_END",
+        "HISTORICAL_GAP_CONFLICT_STATUS",
+    }
+    assert not any(f.code in forbidden for f in result.findings)
