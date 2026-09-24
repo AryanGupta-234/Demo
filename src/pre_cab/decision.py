@@ -4,7 +4,7 @@ from __future__ import annotations
 from .field_requirement_engine import FieldRequirementEngine, RequirementLevel
 from .input_loader import normalize_change_type
 from .requirements import infer_requirements
-from .rules import context_flags, effective_environment, field_quality, model_field_validation, required_field_policies, signoff_disposition
+from .rules import change_profile, context_flags, effective_environment, evidence_matrix, field_quality, model_field_validation, required_field_policies, signoff_disposition
 from .schemas import Decision, Finding, FindingSeverity, Requirement, Strictness, ValidationResult
 
 STRICTNESS_PENALTIES = {
@@ -98,6 +98,8 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
 
     policies = required_field_policies(cr)
     flags = context_flags(cr)
+    profile = change_profile(cr)
+    matrix = evidence_matrix(cr)
     for policy, required, matched_flags in policies:
         requirements.append(
             Requirement(
@@ -356,6 +358,9 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
                 "non_prod_validation": context_flags(cr).get("non-prod-validation", False),
             },
             "context_flags": flags,
+            "change_profile": profile,
+            "evidence_matrix": matrix,
+            "deterministic_contradictions": __import__("pre_cab.rules", fromlist=["contradiction_signals"]).contradiction_signals(cr),
             "required_field_count": sum(1 for _, required, _ in policies if required),
             "field_quality": [
                 {"field": item.field, "present": item.present, "score": item.score, "reasons": list(item.reasons)}
