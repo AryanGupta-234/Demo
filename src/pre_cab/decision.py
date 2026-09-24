@@ -4,7 +4,7 @@ from __future__ import annotations
 from .field_requirement_engine import FieldRequirementEngine, RequirementLevel
 from .input_loader import normalize_change_type
 from .requirements import infer_requirements
-from .rules import change_profile, context_flags, effective_environment, evidence_matrix, field_quality, model_field_validation, required_field_policies, signoff_disposition
+from .rules import change_profile, context_flags, contradiction_signals, effective_environment, evidence_matrix, field_quality, model_field_validation, required_field_policies, signoff_disposition
 from .schemas import Decision, Finding, FindingSeverity, Requirement, Strictness, ValidationResult
 
 STRICTNESS_PENALTIES = {
@@ -298,7 +298,9 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
     fr_report = _FIELD_REQUIREMENT_ENGINE.evaluate(cr)
     advisory_fields = {
         "Configuration item", "Environment", "Change plan", "Work notes", "Comments",
-        "UAT signoff", "TCS QA signoff", "Test Results Evidence", "Lower Environment Reference CR/SR",
+        "UAT signoff", "Customer Approval", "TCS QA signoff", "Test Results Evidence",
+        "Lower Environment Reference CR/SR", "Risk", "Category", "Sub Category",
+        "Planned start", "Planned end", "Conflict status",
     }
     required_names = {req.name for req in requirements if req.required}
     for item in fr_report.findings:
@@ -360,7 +362,7 @@ def validate_fields(cr: dict, strictness: Strictness = Strictness.BALANCED) -> V
             "context_flags": flags,
             "change_profile": profile,
             "evidence_matrix": matrix,
-            "deterministic_contradictions": __import__("pre_cab.rules", fromlist=["contradiction_signals"]).contradiction_signals(cr),
+            "deterministic_contradictions": contradiction_signals(cr),
             "required_field_count": sum(1 for _, required, _ in policies if required),
             "field_quality": [
                 {"field": item.field, "present": item.present, "score": item.score, "reasons": list(item.reasons)}
