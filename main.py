@@ -9,6 +9,7 @@ from typing import Any
 
 from pre_cab.audit_store import SQLiteAuditStore
 from pre_cab.env_loader import load_dotenv
+from pre_cab.local_attachments import SUPPORTED_SUFFIXES
 from pre_cab.input_loader import load_cr_records, normalize_cr_record, record_type, source_id
 from pre_cab.narrative import format_agent_chains, format_cab_result
 from pre_cab.pipeline import run_pre_cab
@@ -16,6 +17,46 @@ from pre_cab.persistent_memory import SQLiteUnifiedMemory
 from pre_cab.reporting import build_report
 from pre_cab.runtime_provider import build_runtime_provider
 from pre_cab.schemas import Strictness
+
+
+def resolve_attachment_root(cr_json: Path, cr_number: str, explicit_root: Path | None) -> Path:
+    """Resolve a CR evidence root without requiring an extra CLI flag.
+
+    Existing CR-scoped workspaces are preferred. When none exists, a local
+    evidence directory is returned and the pipeline will create <CR number>
+    beneath it automatically.
+    """
+    if explicit_root is not None:
+        return explicit_root
+
+    cr_number = str(cr_number or "").strip()
+    candidates = [
+        cr_json.parent / "evidence",
+        cr_json.parent / "attachments",
+        cr_json.parent,
+        Path.cwd() / "evidence",
+        Path.cwd() / "attachments",
+    ]
+
+    # Prefer an existing CR-scoped workspace.
+    for root in candidates:
+        if cr_number and (root / cr_number).is_dir():
+            return root
+
+    # Prefer a root containing CR-prefixed evidence files.
+    if cr_number:
+        for root in candidates:
+            if not root.is_dir():
+                continue
+            try:
+                for item in root.iterdir():
+                    if item.is_file() and cr_number.lower() in item.name.lower() and item.suffix.lower() in SUPPORTED_SUFFIXES:
+                        return root
+            except OSError:
+                continue
+
+    # No workspace exists yet: create/use a predictable sibling evidence root.
+    return cr_json.parent / "evidence"
 
 
 def main() -> int:
@@ -56,6 +97,9 @@ def main() -> int:
     if args.limit and args.limit < len(records):
         records = records[:args.limit]
 
+    if args.evidence_file and len(records) != 1:
+        raise SystemExit("--evidence-file is only supported for a single-CR run. For batches, place evidence under <evidence-root>/<CR number>/.")
+
     model = None
     have_credentials = any(os.getenv(name) for name in ("GROQ_API_KEY", "HF_TOKEN"))
     if args.provider or have_credentials:
@@ -68,6 +112,13 @@ def main() -> int:
             print(f"LLM unavailable: {type(exc).__name__}: {exc}; continuing with deterministic evaluation only.")
     else:
         print("No LLM credentials detected; continuing with deterministic validation only.")
+
+    # Keep the classic one-command workflow: the evidence root is discovered
+    # automatically from the CR JSON location / common local workspace names.
+    auto_evidence_root: Path | None = None
+    if records:
+        auto_evidence_root = resolve_attachment_root(args.cr_json, source_id(records[0]), args.attachment_root)
+        print(f"Evidence workspace root: {auto_evidence_root}")
 
     memory = SQLiteUnifiedMemory(Path(".pre_cab") / "memory.sqlite3")
     audit = SQLiteAuditStore(Path(".pre_cab") / "audit.sqlite3")
@@ -85,7 +136,11 @@ def main() -> int:
                 strictness=Strictness(args.strictness),
                 model=model,
                 memory=memory,
-                attachment_root=args.attachment_root,
+                attachment_root=(
+                    args.attachment_root
+                    if args.attachment_root is not None
+                    else resolve_attachment_root(args.cr_json, number, None)
+                ),
                 evidence_files=args.evidence_file,
             )
             report = build_report(result.stage1, stage2=result.stage2)
