@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .brain import build_reasoning_payload, build_reasoning_system_prompt, self_critique_questions
+from .brain import build_narrative_system_prompt, build_reasoning_payload, build_reasoning_system_prompt, self_critique_questions
 from .context_compaction import compact_cr, compact_evidence, compact_findings, compact_memory
 from .memory import MemoryKind, UnifiedMemory
 from .models import ModelProvider, ModelResponse
