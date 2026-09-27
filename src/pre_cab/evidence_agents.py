@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .evidence import EvidenceDocument
+if TYPE_CHECKING:
+    from .evidence import EvidenceDocument
 
 
 def _norm(value: Any) -> str:
