@@ -98,11 +98,12 @@ def run_pre_cab(
         if evidence_files:
             stage_folder = stage_files(workspace_root, number, evidence_files)
             loaded, classifications = load_and_classify(workspace_root, number)
-            collected.extend(loaded)
         else:
-            stage_folder = safe_cr_dir(workspace_root, number)
+            # Discover legacy root-level CR-prefixed evidence before creating the
+            # canonical CR folder; otherwise an empty folder would mask those files.
             loaded, classifications = load_and_classify(workspace_root, number)
-            collected.extend(loaded)
+            stage_folder = safe_cr_dir(workspace_root, number)
+        collected.extend(loaded)
         stage1_result.stage1.metadata["evidence_workspace"] = {
             "root": str(workspace_root),
             "cr_folder": str(stage_folder),
