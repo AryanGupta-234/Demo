@@ -348,7 +348,12 @@ class SemanticSQLiteUnifiedMemory:
             ids = [str(row[0]) for row in cluster]
             digest = self._hash("|".join(sorted(ids)))[:16]
             memory_id = f"pattern:{digest}"
-            if any(self._lexical.search(memory_id, kinds=[MemoryKind.SIMILARITY], limit=1)):
+            with self._connect() as conn:
+                exists = conn.execute(
+                    "SELECT 1 FROM memories WHERE memory_id = ?",
+                    (memory_id,),
+                ).fetchone()
+            if exists:
                 continue
             snippets = []
             for row in cluster[:5]:
