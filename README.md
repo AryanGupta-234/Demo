@@ -30,6 +30,12 @@ python main.py "C:\path\to\one_cr.json" --provider ollama
 
 The runner automatically initializes local memory/audit storage and automatically resolves an evidence workspace by checking the CR JSON location and common `evidence/` / `attachments/` directories. If a CR-specific workspace already exists, it is reused; otherwise `evidence\<CR number>\` is created automatically. Any supported PDF/XLSX/TXT/CSV/EML/etc. evidence already present there is extracted, classified, verified, and passed into the final reasoning stage.
 
+The neural engine now uses adaptive self-critique, schema-constrained local generation, bounded malformed-output repair, and a separate language-realization pass. The model's decision/confidence are locked during NLG refinement, so language improvements cannot silently change the decision.
+
+Specialist agents now operate through a shared blackboard: context, technical, business-impact, testing and risk observations are handed forward and a final consistency agent checks for cross-agent disagreements and contradictions.
+
+Unified memory now combines FTS candidate retrieval with identifier-aware reranking, source/kind weighting, confidence, recency and usage signals. Each validation run can also be stored as a non-authoritative episodic memory, allowing later runs to retrieve prior failure patterns without treating past decisions as current evidence.
+
 No synthetic approval/UAT document is generated automatically. Missing evidence remains missing rather than being fabricated for a PASS decision.
 
 Optional controls remain available for testing and integration:
