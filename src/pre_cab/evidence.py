@@ -185,7 +185,22 @@ def verify_attachments(
         if document.metadata.get("extraction_error"):
             findings.append(Finding("EVIDENCE_UNREADABLE", "Evidence could not be fully parsed", FindingSeverity.WARNING, f"Attachment {document.name} could not be extracted: {document.metadata['extraction_error']}", evidence_refs=(document.ref,)))
         if document.metadata.get("requires_vision") and not document.text.strip():
-            findings.append(Finding("EVIDENCE_VISION_REVIEW_REQUIRED", "Image evidence requires visual review", FindingSeverity.WARNING, f"Attachment {document.name} is image-based and has no extracted text.", evidence_refs=(document.ref,), recommendation="Route image evidence to a vision-capable review step."))
+            findings.append(Finding(
+                "EVIDENCE_UNREADABLE",
+                "Evidence content could not be extracted",
+                FindingSeverity.WARNING,
+                f"Attachment {document.name} is image-based and contains no machine-readable text.",
+                evidence_refs=(document.ref,),
+                recommendation="Route the attachment to visual/OCR review before relying on it as evidence.",
+            ))
+            findings.append(Finding(
+                "EVIDENCE_VISION_REVIEW_REQUIRED",
+                "Image evidence requires visual review",
+                FindingSeverity.WARNING,
+                f"Attachment {document.name} is image-based and has no extracted text.",
+                evidence_refs=(document.ref,),
+                recommendation="Route image evidence to a vision-capable review step.",
+            ))
 
     specialist_negatives = [
         item for item in specialist if int(item.get("negative_count", 0)) > 0
@@ -203,7 +218,10 @@ def verify_attachments(
 
     all_text = "\n".join(d.text for d in documents)
     prod_target = _norm(cr.get("Environment")) in {"prod", "production"} or not _norm(cr.get("Environment"))
-    if prod_target and _contains_any(all_text, ("dev-only", "dev only", "tested in dev", "development environment", "test environment: dev")):
+    if prod_target and _contains_any(all_text, (
+        "dev-only", "dev only", "tested in dev", "dev testing",
+        "development environment", "test environment: dev", "environment: dev",
+    )):
         contradictions.append("Evidence indicates DEV-only validation for a PROD-targeted change.")
         findings.append(Finding("EVIDENCE_PROD_DEV_CONTRADICTION", "PROD target with DEV-only evidence", FindingSeverity.BLOCKING, "The CR targets PROD (explicitly or by workflow context) but supplied evidence indicates only DEV validation.", recommendation="Provide production-equivalent non-PROD validation evidence and reconcile the environment claim."))
 
