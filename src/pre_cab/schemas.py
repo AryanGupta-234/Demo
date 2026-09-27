@@ -71,3 +71,6 @@ class AgentContext:
     # Compact field-selected representation for generative reasoning. Deterministic
     # agents continue to receive the complete normalized CR through `cr`.
     llm_cr: dict[str, Any] | None = None
+    # Sequential agent blackboard. Earlier specialists publish compact, auditable
+    # observations so later specialists can challenge or build on them.
+    agent_state: dict[str, Any] = field(default_factory=dict)
