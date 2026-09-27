@@ -282,6 +282,7 @@ class AgenticReasoningLoop:
         payload["retrieved_memory"] = compact_memory(list(payload.get("retrieved_memory") or []), limit=8)
         payload["prior_findings"] = compact_findings(list(payload.get("prior_findings") or []), limit=18)
         payload["strictness"] = context.strictness.value
+        payload["agent_council"] = context.agent_state.get("_council", {})
         payload["agent_blackboard"] = {
             name: {
                 "findings": list((state or {}).get("findings", []))[:8],
