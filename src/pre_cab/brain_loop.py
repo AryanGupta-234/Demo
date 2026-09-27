@@ -64,6 +64,7 @@ class ReasoningLoopResult:
     retrieved_memory: tuple[dict[str, Any], ...]
     questions: tuple[str, ...]
     mode: str = "adaptive"
+    final: ModelResponse | None = None
 
 
 class AgenticReasoningLoop:
@@ -460,10 +461,66 @@ class AgenticReasoningLoop:
                 }, ensure_ascii=False, default=str),
                 temperature=0.0,
             )
+        final_response = critique or initial
+        nlg_mode = (os.getenv("PRE_CAB_NLG_MODE") or "refine").strip().lower()
+        if nlg_mode not in {"off", "refine"}:
+            nlg_mode = "refine"
+
+        # Keep reasoning and language realization separate. The second call may improve
+        # readability, but its decision/confidence are hard-locked to the reasoning pass.
+        if nlg_mode == "refine":
+            base_response = final_response
+            parsed = self._parse_initial(base_response.text)
+            if isinstance(parsed, dict):
+                narrative_input = {
+                    "locked_decision": parsed.get("prediction"),
+                    "locked_confidence": parsed.get("confidence"),
+                    "facts": parsed.get("facts", []),
+                    "inferences": parsed.get("inferences", []),
+                    "uncertainties": parsed.get("uncertainties", []),
+                    "contradictions": parsed.get("contradictions", []),
+                    "technical_reasoning": parsed.get("technical_reasoning", ""),
+                    "cab_reasoning": parsed.get("cab_reasoning", ""),
+                    "cab_questions": parsed.get("cab_questions", []),
+                    "recommendations": parsed.get("recommendations", []),
+                    "self_critique": parsed.get("self_critique", []),
+                }
+                try:
+                    nlg = self.model.generate(
+                        system=build_narrative_system_prompt(),
+                        user=json.dumps(narrative_input, ensure_ascii=False, default=str),
+                        temperature=0.18,
+                        response_format={"type": "json_object"},
+                        reasoning_effort="low",
+                    )
+                    narrative = self._parse_initial(nlg.text)
+                except Exception:
+                    narrative = None
+
+                if isinstance(narrative, dict):
+                    merged = dict(parsed)
+                    for key in ("technical_reasoning", "cab_reasoning", "cab_questions", "recommendations", "self_critique"):
+                        if key in narrative:
+                            merged[key] = narrative[key]
+                    merged["prediction"] = parsed.get("prediction")
+                    merged["confidence"] = parsed.get("confidence")
+                    final_response = ModelResponse(
+                        text=json.dumps(merged, ensure_ascii=False, default=str),
+                        model=base_response.model,
+                        raw={"reasoning": base_response.raw, "narrative": nlg.raw},
+                    )
+
         memory_cr = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
         clean_memory_cr = compact_cr(sanitize_cr_for_reasoning(memory_cr))
         memory_view = tuple(
             {"id": m.memory_id, "kind": m.kind.value, "text": m.text, "metadata": m.metadata, "score": m.score}
             for m in self._memories(clean_memory_cr)
         )
-        return ReasoningLoopResult(initial=initial, critique=critique, retrieved_memory=memory_view, questions=self_critique_questions(), mode=self.mode)
+        return ReasoningLoopResult(
+            initial=initial,
+            critique=critique,
+            retrieved_memory=memory_view,
+            questions=self_critique_questions(),
+            mode=self.mode,
+            final=final_response,
+        )
