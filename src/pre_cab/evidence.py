@@ -218,11 +218,16 @@ def verify_attachments(
 
     all_text = "\n".join(d.text for d in documents)
     prod_target = _norm(cr.get("Environment")) in {"prod", "production"} or not _norm(cr.get("Environment"))
-    if prod_target and _contains_any(all_text, (
-        "dev-only", "dev only", "tested in dev", "dev testing",
-        "development environment", "test environment: dev", "environment: dev",
-    )):
-        contradictions.append("Evidence indicates DEV-only validation for a PROD-targeted change.")
+    evidence_lower = _norm(all_text)
+    dev_environment = bool(re.search(
+        r"\b(?:dev|development)(?:\s+environment)?\b", evidence_lower
+    ))
+    validation_action = bool(re.search(
+        r"\b(?:test|tested|testing|validate|validated|validation|verification|verified)\b",
+        evidence_lower,
+    ))
+    if prod_target and dev_environment and validation_action:
+        contradictions.append("Evidence indicates DEV environment validation while the change is targeted to PROD.")
         findings.append(Finding("EVIDENCE_PROD_DEV_CONTRADICTION", "PROD target with DEV-only evidence", FindingSeverity.BLOCKING, "The CR targets PROD (explicitly or by workflow context) but supplied evidence indicates only DEV validation.", recommendation="Provide production-equivalent non-PROD validation evidence and reconcile the environment claim."))
 
     if any(f.severity == FindingSeverity.BLOCKING for f in findings):
