@@ -471,6 +471,40 @@ class AgenticReasoningLoop:
             or confidence < 0.88
         )
 
+    def _generate_narrative(self, narrative_input: dict[str, Any]) -> ModelResponse | None:
+        try:
+            response = self.model.generate(
+                system=build_narrative_system_prompt(),
+                user=json.dumps(narrative_input, ensure_ascii=False, default=str),
+                temperature=0.18,
+                response_format=_NARRATIVE_SCHEMA,
+                reasoning_effort="low",
+            )
+        except Exception:
+            return None
+        if self._parse_narrative(response.text) is not None:
+            return response
+
+        repair_input = {
+            "source_narrative": narrative_input,
+            "invalid_response": response.text[:10000],
+            "instruction": (
+                "Return ONLY the five narrative fields required by the schema. "
+                "Rewrite for clarity without changing facts, decision, confidence, evidence status or uncertainty."
+            ),
+        }
+        try:
+            repaired = self.model.generate(
+                system=build_narrative_system_prompt() + " The previous language realization failed validation; repair it without adding facts.",
+                user=json.dumps(repair_input, ensure_ascii=False, default=str),
+                temperature=0.05,
+                response_format=_NARRATIVE_SCHEMA,
+                reasoning_effort="low",
+            )
+        except Exception:
+            return None
+        return repaired if self._parse_narrative(repaired.text) is not None else None
+
     def _generate(self, *, system: str, user: str, temperature: float = 0.03) -> ModelResponse:
         response = self.model.generate(
             system=system,
@@ -544,17 +578,8 @@ class AgenticReasoningLoop:
                     "recommendations": parsed.get("recommendations", []),
                     "self_critique": parsed.get("self_critique", []),
                 }
-                try:
-                    nlg = self.model.generate(
-                        system=build_narrative_system_prompt(),
-                        user=json.dumps(narrative_input, ensure_ascii=False, default=str),
-                        temperature=0.18,
-                        response_format=_NARRATIVE_SCHEMA,
-                        reasoning_effort="low",
-                    )
-                    narrative = self._parse_narrative(nlg.text)
-                except Exception:
-                    narrative = None
+                nlg = self._generate_narrative(narrative_input)
+                narrative = self._parse_narrative(nlg.text) if nlg is not None else None
 
                 if isinstance(narrative, dict):
                     merged = dict(parsed)
