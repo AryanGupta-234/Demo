@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-from .schemas import Decision, Finding, FindingSeverity, Requirement, Strictness
+from .schemas import Decision, Finding, FindingSeverity, Requirement, Strictness\nfrom .evidence_agents import DEFAULT_DOCUMENT_AGENTS
 
 
 class EvidenceDocument:
@@ -142,7 +142,7 @@ def verify_attachments(
         wanted = {name.lower(), *(alias.lower() for alias in aliases)}
         return any(r.required and r.name.lower() in wanted for r in reqs)
 
-    # TEST / UAT
+    specialist = [agent.run(cr, relevant) for agent in DEFAULT_DOCUMENT_AGENTS]\n    specialist_map = {item["purpose"]: item for item in specialist}\n    verified["specialist_agents"] = specialist_map\n\n    # TEST / UAT
     test_required = required("UAT", "testing", "test evidence") or bool(_norm(cr.get("Test plan")))
     test_documents = [
         d for d in relevant
@@ -367,7 +367,7 @@ def verify_attachments(
                 recommendation="Route image evidence to a vision-capable review step.",
             ))
 
-    # High-signal contradiction detection.
+    # Specialist-agent contradictions and negative evidence are hard safety signals.\n    for item in specialist:\n        if item.get("negative_count", 0) > 0:\n            findings.append(Finding(\n                f"EVIDENCE_AGENT_NEGATIVE_{item["purpose"].upper()}",\n                f"{item["purpose"]} document contains negative evidence",\n                FindingSeverity.BLOCKING,\n                f"Specialist document review found negative evidence for {item["purpose"]}.",\n                evidence_refs=tuple(c["ref"] for c in item.get("candidates", []) if c.get("status") == "negative"),\n                recommendation=f"Resolve the negative {item["purpose"]} evidence before CAB.",\n            ))\n\n    # High-signal contradiction detection.
     all_text = "\n".join(d.text for d in relevant)
     prod_target = _norm(cr.get("Environment")) in {"prod", "production"} or not _norm(cr.get("Environment"))
     if prod_target and _contains_any(all_text, ("dev-only", "dev only", "tested in dev", "development environment", "test environment: dev")):
