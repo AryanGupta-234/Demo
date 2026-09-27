@@ -25,30 +25,25 @@ def main() -> int:
     parser.add_argument("--strictness", choices=[s.value for s in Strictness], default="balanced")
     parser.add_argument("--provider", choices=["auto", "groq", "huggingface", "ollama"], default=None)
     parser.add_argument("--attachment-root", type=Path, default=None)
+    parser.add_argument(
+        "--evidence-file",
+        action="append",
+        type=Path,
+        default=[],
+        help="Local evidence file to stage into <attachment-root>/<CR number>. Repeat for multiple files.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/pre_cab"))
     parser.add_argument(
         "--include-emergency", action="store_true",
         help="Also process Emergency-type changes (excluded by default - this system is scoped to Normal CAB review).",
     )
-    parser.add_argument(
-        "--limit", type=int, default=0,
-        help="Process only the first N in-scope records. Each record with an LLM provider costs one "
-             "sequential generation call (roughly 20-30s on a local model like Ollama) - for a large "
-             "file, test on a small --limit first rather than committing to the full run blind.",
-    )
+    parser.add_argument("--limit", type=int, default=0, help="Process only the first N in-scope records.")
     args = parser.parse_args()
 
     records = load_cr_records(args.cr_json)
     if not records:
         raise SystemExit("Input JSON contains no CR records")
 
-    # Default scope is Normal changes only: Emergency changes don't go through the
-    # CAB call this system supports, and scoring them against Normal-change field/
-    # historical patterns would be a category error, not a finding. Filtering here
-    # (main.py, the one-command entry point) closes a real gap: only batch.py's
-    # bulk path had this filter before, so pointing main.py directly at a raw
-    # export previously meant burning LLM calls (and CPU time) on out-of-scope
-    # records with no way to opt out short of pre-filtering the file yourself.
     if not args.include_emergency:
         before = len(records)
         records = [r for r in records if record_type(r) != "emergency"]
@@ -59,18 +54,8 @@ def main() -> int:
         raise SystemExit("No in-scope records to process after filtering (all were Emergency-type).")
 
     if args.limit and args.limit < len(records):
-        print(f"Limiting to the first {args.limit} of {len(records)} in-scope records (--limit).")
-        records = records[: args.limit]
+        records = records[:args.limit]
 
-    # GPT-OSS is the generative reasoning layer. V1 intentionally uses Groq first;
-    # Hugging Face remains available as an explicit/automatic fallback. It is
-    # never a prerequisite for the deterministic engine, though: the one-command
-    # tool must still work with zero setup (see run_pre_cab/run_stage1 - the
-    # deterministic safety reconciliation is the final authority regardless of
-    # whether a model ran at all). A missing/failing provider degrades to
-    # deterministic-only validation, unless the user explicitly named one with
-    # --provider, in which case failing to honor that choice silently would be
-    # more confusing than just saying so.
     model = None
     have_credentials = any(os.getenv(name) for name in ("GROQ_API_KEY", "HF_TOKEN"))
     if args.provider or have_credentials:
@@ -82,7 +67,7 @@ def main() -> int:
                 raise SystemExit(f"Could not initialize reasoning provider: {type(exc).__name__}: {exc}") from exc
             print(f"LLM unavailable: {type(exc).__name__}: {exc}; continuing with deterministic evaluation only.")
     else:
-        print("No GPT-OSS credentials detected; continuing with deterministic validation only.")
+        print("No LLM credentials detected; continuing with deterministic validation only.")
 
     memory = SQLiteUnifiedMemory(Path(".pre_cab") / "memory.sqlite3")
     audit = SQLiteAuditStore(Path(".pre_cab") / "audit.sqlite3")
@@ -92,30 +77,31 @@ def main() -> int:
         number = source_id(cr)
         print(f"[{index}/{len(records)}] Processing {number}...")
         try:
+            # With --attachment-root the pipeline creates/resolves <root>/<CR number>
+            # and discovers supported evidence recursively. With --evidence-file, supplied
+            # files are first copied into that CR folder and then parsed/verified.
             result = run_pre_cab(
                 cr,
                 strictness=Strictness(args.strictness),
                 model=model,
                 memory=memory,
                 attachment_root=args.attachment_root,
+                evidence_files=args.evidence_file,
             )
             report = build_report(result.stage1, stage2=result.stage2)
             report.update({
                 "cr_number": number,
                 "final_decision": result.final_decision.value,
                 "documents_analyzed": len(result.documents),
+                "evidence_manifest": result.evidence_manifest,
                 "final_reasoning": result.stage1.metadata.get("brain", {}),
                 "llm_model": getattr(model, "model_name", None),
             })
             canonical_cr = normalize_cr_record(cr)
             report["agent_chains_text"] = format_agent_chains(result.agent_results)
             report["cab_block_text"] = format_cab_result(
-                number,
-                canonical_cr,
-                result.final_decision,
-                result.stage1.confidence,
-                result.agent_results,
-                result.stage1.findings,
+                number, canonical_cr, result.final_decision, result.stage1.confidence,
+                result.agent_results, result.stage1.findings,
                 result.stage1.metadata.get("brain") or {},
             )
             run_id = audit.record(
@@ -130,32 +116,22 @@ def main() -> int:
             report["run_id"] = run_id
             args.output_dir.mkdir(parents=True, exist_ok=True)
             (args.output_dir / f"{number}_pre_cab.json").write_text(
-                json.dumps(report, indent=2, ensure_ascii=False, default=str),
-                encoding="utf-8",
+                json.dumps(report, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
             )
-            # Plain, human-readable companion file - the .json above is for tooling/audit
-            # (agent_chains_text/cab_block_text sit inside it as escaped JSON strings,
-            # unreadable at a glance); this .txt is what a person should actually open.
             readable = f"{report['agent_chains_text']}\n\n{report['cab_block_text']}\n"
             (args.output_dir / f"{number}_pre_cab.txt").write_text(readable, encoding="utf-8")
             reports.append(report)
         except Exception as exc:
-            report = {
-                "cr_number": number,
-                "final_decision": "ERROR",
-                "error": f"{type(exc).__name__}: {exc}",
-            }
+            report = {"cr_number": number, "final_decision": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
             reports.append(report)
             print(f"  ERROR: {report['error']}")
 
     if len(reports) == 1:
         report = reports[0]
-        agent_chains = report.get("agent_chains_text")
-        if agent_chains:
-            print(f"\n{agent_chains}\n")
-        cab_block = report.get("cab_block_text")
-        if cab_block:
-            print(cab_block)
+        if report.get("agent_chains_text"):
+            print(f"\n{report['agent_chains_text']}\n")
+        if report.get("cab_block_text"):
+            print(report["cab_block_text"])
         else:
             print(f"\nCR {report.get('cr_number')}: {report.get('final_decision')} (see error above)")
     else:
@@ -171,8 +147,7 @@ def main() -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "batch_results.json").write_text(
-        json.dumps(reports, indent=2, ensure_ascii=False, default=str),
-        encoding="utf-8",
+        json.dumps(reports, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
     )
     return 0 if all(r.get("final_decision") != "ERROR" for r in reports) else 2
 
