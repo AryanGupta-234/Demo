@@ -56,7 +56,10 @@ class OllamaProvider:
                 ],
                 "stream": False,
                 "options": {"temperature": temperature, "num_ctx": num_ctx},
-                "format": "json",
+                # Ollama accepts either the literal JSON format or a JSON schema.
+                # The reasoning engine supplies the schema so small local models
+                # have a constrained output surface instead of free-form prose.
+                "format": response_format if isinstance(response_format, dict) else "json",
             }
 
             request = Request(
