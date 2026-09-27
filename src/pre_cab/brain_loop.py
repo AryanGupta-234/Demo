@@ -81,14 +81,66 @@ class AgenticReasoningLoop:
             effort = "medium"
         self.reasoning_effort = effort
 
+    def _memory_queries(self, cr: dict[str, Any]) -> list[tuple[str, list[MemoryKind]]]:
+        """Decompose recall into independent lanes before fusion."""
+        core = " ".join(str(cr.get(k) or "") for k in (
+            "Short description", "Description", "Category", "Sub Category", "Change Class"
+        ))
+        technical = " ".join(str(cr.get(k) or "") for k in (
+            "Configuration item", "Implementation plan", "Change plan",
+            "Backout plan", "Risk and impact analysis"
+        ))
+        testing = " ".join(str(cr.get(k) or "") for k in (
+            "Test plan", "UAT signoff", "Test Results Evidence",
+            "Lower Environment Reference CR/SR", "Work notes", "Comments"
+        ))
+        governance = " ".join(str(cr.get(k) or "") for k in (
+            "Customer Approval", "TCS QA signoff", "Risk", "Priority",
+            "Conflict status"
+        ))
+        return [
+            (core or build_cr_query(cr), [MemoryKind.CAB_HISTORY, MemoryKind.SIMILARITY, MemoryKind.FACT]),
+            (technical, [MemoryKind.CAB_HISTORY, MemoryKind.POLICY, MemoryKind.EVIDENCE, MemoryKind.SIMILARITY]),
+            (testing, [MemoryKind.EVIDENCE, MemoryKind.CAB_HISTORY, MemoryKind.EPISODE]),
+            (governance, [MemoryKind.POLICY, MemoryKind.CAB_HISTORY, MemoryKind.EPISODE]),
+        ]
+
     def _memories(self, cr: dict[str, Any]) -> list[Any]:
         if not self.memory:
             return []
-        return self.memory.search(
-            build_cr_query(cr),
-            kinds=[MemoryKind.FACT, MemoryKind.CAB_HISTORY, MemoryKind.POLICY, MemoryKind.EVIDENCE, MemoryKind.SIMILARITY, MemoryKind.EPISODE],
-            limit=self.limit,
-        )
+        candidates: dict[str, Any] = {}
+        lane_count: dict[str, int] = {}
+        for query, kinds in self._memory_queries(cr):
+            query = " ".join(query.split()).strip()
+            if not query:
+                continue
+            for item in self.memory.search(query, kinds=kinds, limit=max(4, self.limit // 2)):
+                candidates[item.memory_id] = item
+                lane_count[item.memory_id] = lane_count.get(item.memory_id, 0) + 1
+
+        ranked: list[tuple[float, int, Any]] = []
+        for item in candidates.values():
+            score = float(item.score or 0.0)
+            score = min(1.0, score + min(0.12, 0.04 * (lane_count.get(item.memory_id, 1) - 1)))
+            ranked.append((score, lane_count.get(item.memory_id, 1), item))
+        ranked.sort(key=lambda row: (row[0], row[1]), reverse=True)
+
+        selected: list[Any] = []
+        used_kinds: set[MemoryKind] = set()
+        for _, _, item in ranked:
+            if item.kind not in used_kinds:
+                selected.append(item)
+                used_kinds.add(item.kind)
+            if len(selected) >= min(self.limit, len(ranked)):
+                break
+        if len(selected) < min(self.limit, len(ranked)):
+            for _, _, item in ranked:
+                if item in selected:
+                    continue
+                selected.append(item)
+                if len(selected) >= self.limit:
+                    break
+        return selected[:self.limit]
 
     @staticmethod
     def _mapped_cr(cr: dict[str, Any]) -> dict[str, Any]:
