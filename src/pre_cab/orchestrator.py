@@ -7,6 +7,7 @@ from typing import Any
 
 from .agents import DEFAULT_AGENT_TYPES, AgentResult
 from .agent_intelligence import build_agent_intelligence
+from .agent_intelligence import build_agent_intelligence
 from .brain_loop import AgenticReasoningLoop, ReasoningLoopResult
 from .decision import validate_fields
 from .memory import UnifiedMemory
@@ -99,6 +100,9 @@ def run_stage1(
             "requirements": result.requirements[:12],
             "notes": result.notes,
         }
+
+    agent_council = build_agent_intelligence(results)
+    shared_state["_council"] = agent_council
 
     merged = list(stage1.findings)
     for result in results:
@@ -201,6 +205,7 @@ def run_stage1(
             "agent_notes": agent_notes,
             "agent_intelligence": agent_intelligence,
             "agent_blackboard": shared_state,
+            "agent_council": agent_council,
             "reasoning_mode": reasoning.mode if reasoning is not None else "none",
             "reasoning_passes": (2 if reasoning and reasoning.critique is not None else (1 if reasoning else 0)),
             "model": getattr(model, "model_name", None),
