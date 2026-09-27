@@ -243,8 +243,10 @@ class MemoryAgent(BaseAgent):
     def run(self, context: AgentContext) -> AgentResult:
         if not self.memory:
             return AgentResult(self.name, [], [], {"matches": []})
-        query = " ".join(str(context.cr.get(k) or "") for k in ("Short description", "Description", "Category", "Sub Category", "Configuration item"))
-        matches = self.memory.search(query, kinds=[MemoryKind.CAB_HISTORY, MemoryKind.SIMILARITY, MemoryKind.POLICY], limit=8)
+        profile = context.agent_state.get("context", {}).get("notes", {}).get("change_profile") or {}
+        query = " ".join(str(context.cr.get(k) or "") for k in ("Short description", "Description", "Category", "Sub Category", "Configuration item", "Implementation plan", "Test plan"))
+        query += " " + " ".join(str(item) for item in profile.get("archetypes", [])[:4])
+        matches = self.memory.search(query, kinds=[MemoryKind.CAB_HISTORY, MemoryKind.SIMILARITY, MemoryKind.POLICY, MemoryKind.EPISODE], limit=10)
         return AgentResult(self.name, [], [], {"matches": [m.__dict__ for m in matches]})
 
 
@@ -298,7 +300,14 @@ class TestingAgent(BaseAgent):
                 "The infrastructure test approach is defined, but the reviewed CR does not yet contain a positive execution result in Work Notes/Comments.",
                 recommendation="Record the post-change sanity-check result when executed.",
             ))
+        prior_technical = context.agent_state.get("technical", {}).get("notes", {})
+        implementation_present = bool(prior_technical.get("implementation_present", bool(cr.get("Implementation plan"))))
+        rollback_aligned = bool(prior_technical.get("rollback_aligned", True))
         coverage_ok = bool(test_plan) and not execution_failed and (not profile["formal_test_evidence_expected"] or formal_evidence_positive or execution_claimed)
+        if profile.get("functional") and not implementation_present:
+            findings.append(Finding("TEST_TECHNICAL_COVERAGE_GAP", "Testing is defined against an incomplete implementation context", FindingSeverity.WARNING, "The technical specialist did not establish a populated implementation plan for the functional change.", recommendation="Complete the implementation steps before relying on the testing plan as readiness evidence."))
+        if profile.get("high_impact") and implementation_present and not rollback_aligned:
+            findings.append(Finding("TEST_ROLLBACK_ALIGNMENT_GAP", "Testing context does not confirm rollback alignment", FindingSeverity.WARNING, "The change is higher-impact and the technical specialist could not confirm that rollback is aligned with implementation.", recommendation="Confirm rollback triggers and recovery validation against the implementation sequence."))
         chain = [
             "non-PROD validation mentioned (SIT/UAT/Pre-PROD/lower environment are treated equivalently)" if flags.get("non-prod-validation") else "no non-PROD validation reference stated",
             "test plan is defined" if test_plan else "test plan is missing",
@@ -366,7 +375,15 @@ class RiskAgent(BaseAgent):
             findings.append(Finding("RISK_IMPACT_CONTRADICTION", "Declared risk conflicts with impact narrative", FindingSeverity.WARNING, f"Risk is declared {risk!r} but the change context suggests elevated production impact.", technical_detail=impact[:2000], recommendation="Reconcile the declared risk level with the described impact before CAB review."))
         findings.append(Finding("RISK_CONTEXT", "Risk context captured", FindingSeverity.INFO, f"Declared risk: {risk or 'unknown'}.", technical_detail=impact[:4000]))
         impact_level = "elevated" if profile["high_impact"] else "moderate" if impact else "unstated"
-        chain = [f"declared risk = {risk or 'unknown'}", f"impact narrative suggests {impact_level} production exposure" if impact else "no impact narrative provided", "contradiction: declared risk conflicts with impact narrative" if contradiction else "no direct contradiction", f"confidence {confidence:.2f}"]
+        business_notes = context.agent_state.get("business_impact", {}).get("notes", {})
+        customer_signal = bool(business_notes.get("customer_visible_signal"))
+        chain = [
+            f"declared risk = {risk or 'unknown'}",
+            f"impact narrative suggests {impact_level} production exposure" if impact else "no impact narrative provided",
+            "customer-facing signal confirmed by business-impact agent" if customer_signal else "no customer-facing signal confirmed by business-impact agent",
+            "contradiction: declared risk conflicts with impact narrative" if contradiction else "no direct contradiction",
+            f"confidence {confidence:.2f}",
+        ]
         return AgentResult(self.name, findings, [], {"chain": chain, "risk_confidence": confidence, "contradiction": contradiction, "change_profile": profile})
 
 
@@ -418,5 +435,77 @@ class DecisionAgent(BaseAgent):
     def run(self, context: AgentContext) -> AgentResult:
         return AgentResult(self.name, [Finding("DECISION_GATED", "Decision remains policy-gated", FindingSeverity.INFO, "Final readiness is determined after specialist findings, evidence verification and policy gates.")], [], {"generative_brain_is_external": True})
 
+class CrossAgentConsistencyAgent(BaseAgent):
+    """Cross-check specialist outputs after domain reasoning has completed."""
 
-DEFAULT_AGENT_TYPES = [FieldAgent, ContextAgent, TechnicalAgent, BusinessImpactAgent, MemoryAgent, TestingAgent, RiskAgent, EvidenceAgent, CloneAgent, DecisionAgent]
+    name = "consistency"
+
+    def run(self, context: AgentContext) -> AgentResult:
+        state = context.agent_state
+        findings: list[Finding] = []
+        chains: list[str] = []
+
+        def notes(name: str) -> dict[str, Any]:
+            item = state.get(name, {})
+            return item.get("notes", {}) if isinstance(item, dict) else {}
+
+        context_notes = notes("context")
+        technical_notes = notes("technical")
+        testing_notes = notes("testing")
+        risk_notes = notes("risk")
+        business_notes = notes("business_impact")
+        profile = context_notes.get("change_profile") or {}
+
+        if profile.get("functional") and technical_notes.get("implementation_present") is False:
+            findings.append(Finding(
+                "AGENT_CONSISTENCY_IMPLEMENTATION",
+                "Agent disagreement: functional change lacks implementation detail",
+                FindingSeverity.WARNING,
+                "The context agent classified the CR as functionally relevant, while the technical agent found no populated implementation plan.",
+                recommendation="Reconcile the implementation description before CAB.",
+            ))
+            chains.append("context=FUNCTIONAL; technical=implementation_missing")
+
+        if profile.get("customer_facing") and not business_notes.get("customer_visible_signal"):
+            findings.append(Finding(
+                "AGENT_CONSISTENCY_CUSTOMER_SIGNAL",
+                "Agent disagreement: customer impact signal is unresolved",
+                FindingSeverity.WARNING,
+                "The context profile indicates customer-facing scope, but the business-impact agent did not confirm a corresponding narrative signal.",
+                recommendation="Clarify the actual customer-facing impact and affected service.",
+            ))
+            chains.append("context=customer-facing; business-impact narrative signal=absent")
+
+        matrix = testing_notes.get("evidence_matrix") or {}
+        if matrix.get("execution_status") == "FAILED":
+            findings.append(Finding(
+                "AGENT_CONSISTENCY_TEST_EXECUTION",
+                "Agent consistency check found a failed execution state",
+                FindingSeverity.BLOCKING,
+                "The testing evidence matrix records FAILED execution; this remains a material blocker regardless of other positive test language.",
+                recommendation="Reconcile the execution record and document the final test outcome.",
+            ))
+            chains.append("testing execution_status=FAILED")
+
+        if risk_notes.get("contradiction") and not profile.get("high_impact"):
+            findings.append(Finding(
+                "AGENT_CONSISTENCY_RISK_PROFILE",
+                "Risk conflict requires profile review",
+                FindingSeverity.WARNING,
+                "The risk agent found a risk/impact conflict that the shared profile did not classify as high impact.",
+                recommendation="Review the impact narrative and risk classification together.",
+            ))
+            chains.append("risk contradiction=True; profile high_impact=False")
+
+        if not findings:
+            chains.append("specialist outputs are mutually consistent on the available signals")
+
+        return AgentResult(
+            self.name,
+            findings,
+            [],
+            {"chain": chains, "agent_count_reviewed": len(state), "consistency_clean": not findings},
+        )
+
+
+DEFAULT_AGENT_TYPES = [FieldAgent, ContextAgent, TechnicalAgent, BusinessImpactAgent, MemoryAgent, TestingAgent, RiskAgent, EvidenceAgent, CloneAgent, CrossAgentConsistencyAgent, DecisionAgent]
