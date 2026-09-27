@@ -209,16 +209,28 @@ class SQLiteUnifiedMemory:
         fts_component = 1.0 / (1.0 + abs(float(fts_rank or 0.0)))
         kind_weight = _KIND_WEIGHT.get(kind, 0.90)
 
+        # Authority/reliability is kept separate from similarity. A historical CR
+        # can be highly similar without being a current policy source, while explicit
+        # policy/evidence should remain strong even when lexical overlap is slightly lower.
+        authority_weight = 1.0
+        if metadata.get("authoritative") is True:
+            authority_weight += 0.06
+        if metadata.get("current_cr_evidence") is True:
+            authority_weight += 0.08
+        if metadata.get("historical_outcome") or metadata.get("cab_outcome"):
+            authority_weight -= 0.04
+        authority_weight = max(0.90, min(1.16, authority_weight))
+
         score = (
-            0.45 * lexical
+            0.43 * lexical
             + 0.20 * fts_component
             + 0.15 * exact_id
             + 0.05 * phrase
             + 0.07 * confidence
             + 0.05 * recency
-            + 0.03 * stability
+            + 0.05 * stability
         )
-        return score * kind_weight
+        return score * kind_weight * authority_weight
 
     def _touch(self, memory_ids: list[str]) -> None:
         if not memory_ids:
