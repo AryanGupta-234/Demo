@@ -1,16 +1,10 @@
-"""Specialist agents for document-backed Pre-CAB evidence verification.
-
-These agents operate on locally extracted EvidenceDocument objects. They do not invent approval
-or testing evidence; they convert extracted text into structured verification signals for the
-final reasoning stage.
-"""
+"""Specialist agents for document-backed Pre-CAB evidence verification."""
 from __future__ import annotations
 
 import re
 from typing import Any
 
 from .evidence import EvidenceDocument
-from .schemas import Finding, FindingSeverity
 
 
 def _norm(value: Any) -> str:
@@ -19,7 +13,7 @@ def _norm(value: Any) -> str:
 
 def _contains(text: str, terms: tuple[str, ...]) -> bool:
     low = _norm(text)
-    return any(term in low for term in terms)
+    return any(term.lower() in low for term in terms)
 
 
 def _cr_match(cr: dict[str, Any], doc: EvidenceDocument) -> bool:
@@ -29,17 +23,17 @@ def _cr_match(cr: dict[str, Any], doc: EvidenceDocument) -> bool:
     return number in _norm(doc.name) or number in _norm(doc.text)
 
 
-def _extract_status(text: str) -> str:
+def _status(text: str) -> str:
     low = _norm(text)
-    if re.search(r"\b(rejected|declined|failed|not approved|not passed)\b", low):
+    if re.search(r"\b(rejected|declined|failed|not approved|not passed|pending approval)\b", low):
         return "negative"
-    if re.search(r"\b(approved|accepted|passed|complete|completed|successful|success)\b", low):
+    if re.search(r"\b(approved|accepted|passed|completed|successful|success)\b", low):
         return "positive"
     return "unclear"
 
 
 class DocumentEvidenceAgent:
-    """Evaluate document content against a single evidence purpose."""
+    """Evaluate extracted document content against one evidence purpose."""
 
     def __init__(self, purpose: str, terms: tuple[str, ...]) -> None:
         self.purpose = purpose
@@ -50,65 +44,62 @@ class DocumentEvidenceAgent:
             d for d in documents
             if _contains(f"{d.name}\n{d.text[:20000]}", self.terms) and _cr_match(cr, d)
         ]
-        statuses = [_extract_status(d.text) for d in candidates]
-        positive = any(s == "positive" for s in statuses)
-        negative = any(s == "negative" for s in statuses)
         return {
             "purpose": self.purpose,
-            "candidate_documents": [
+            "candidates": [
                 {
                     "name": d.name,
                     "ref": d.ref,
                     "document_type": d.document_type,
+                    "bytes": d.metadata.get("bytes"),
+                    "status": _status(d.text),
                     "text_chars": len(d.text),
-                    "status": _extract_status(d.text),
                 }
                 for d in candidates
             ],
-            "verified": bool(candidates) and positive and not negative,
-            "negative": negative,
-            "ambiguous": bool(candidates) and not positive and not negative,
+            "positive_count": sum(_status(d.text) == "positive" for d in candidates),
+            "negative_count": sum(_status(d.text) == "negative" for d in candidates),
+            "ambiguous_count": sum(_status(d.text) == "unclear" for d in candidates),
         }
 
 
 class CustomerApprovalAgent(DocumentEvidenceAgent):
     def __init__(self) -> None:
-        super().__init__(
-            "customer_approval",
-            ("customer approval", "customer approved", "approved by customer", "customer signoff"),
-        )
+        super().__init__("customer_approval", (
+            "customer approval", "customer approved", "approved by customer",
+            "customer signoff", "client approval", "client approved",
+        ))
 
 
 class UATAgent(DocumentEvidenceAgent):
     def __init__(self) -> None:
-        super().__init__(
-            "uat",
-            ("uat", "user acceptance", "acceptance signoff", "business signoff"),
-        )
+        super().__init__("uat", (
+            "uat", "user acceptance", "acceptance signoff", "business signoff",
+            "business acceptance", "uat approved",
+        ))
 
 
 class QASignoffAgent(DocumentEvidenceAgent):
     def __init__(self) -> None:
-        super().__init__(
-            "qa_signoff",
-            ("tcs qa", "qa signoff", "quality assurance", "qa approval"),
-        )
+        super().__init__("qa_signoff", (
+            "tcs qa", "qa signoff", "quality assurance", "qa approval", "qa completed",
+        ))
 
 
 class TestEvidenceAgent(DocumentEvidenceAgent):
     def __init__(self) -> None:
-        super().__init__(
-            "test_results",
-            ("test result", "test execution", "test evidence", "expected result", "actual result", "test case"),
-        )
+        super().__init__("test_results", (
+            "test result", "test execution", "test evidence", "expected result",
+            "actual result", "test case", "execution report", "validation result",
+        ))
 
 
 class LowerEnvironmentAgent(DocumentEvidenceAgent):
     def __init__(self) -> None:
-        super().__init__(
-            "lower_environment",
-            ("lower environment", "pre-prod", "preprod", "sit", "staging", "lower env"),
-        )
+        super().__init__("lower_environment", (
+            "lower environment", "pre-prod", "preprod", "sit", "staging",
+            "lower env", "system integration test",
+        ))
 
 
 DEFAULT_DOCUMENT_AGENTS = (
