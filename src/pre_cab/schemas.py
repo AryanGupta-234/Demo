@@ -71,6 +71,9 @@ class AgentContext:
     # Compact field-selected representation for generative reasoning. Deterministic
     # agents continue to receive the complete normalized CR through `cr`.
     llm_cr: dict[str, Any] | None = None
+    # Fused specialist-agent observations for the neural reasoning layer.
+    # This is advisory intelligence, not a policy override.
+    agent_insights: dict[str, Any] = field(default_factory=dict)
     # Sequential agent blackboard. Earlier specialists publish compact, auditable
     # observations so later specialists can challenge or build on them.
     agent_state: dict[str, Any] = field(default_factory=dict)
