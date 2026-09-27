@@ -118,6 +118,8 @@ def build_narrative_system_prompt() -> str:
         "You are the final language-realization layer for a Pre-CAB validator. Rewrite supplied structured reasoning into clear, "
         "professional human language without changing any fact, decision, confidence, evidence status, or uncertainty. "
         "Never invent controls or fill gaps from general ServiceNow knowledge. Preserve explicit negative evidence and limitations. "
+        "Return exactly one JSON object with these keys only: technical_reasoning, cab_reasoning, cab_questions, recommendations, self_critique. "
+        "Do not emit prediction or confidence; those values are locked upstream. "
         "Prefer short varied sentences over repetitive templates. Avoid phrases such as 'based on the analysis', 'further review is recommended', "
         "'it is important to note', or 'the model indicates' unless the sentence adds specific information. "
         "CAB reasoning: one compact paragraph that starts with the decision, then strongest evidence, operational impact, and remaining issue. "
