@@ -442,7 +442,7 @@ class AgenticReasoningLoop:
         if not isinstance(value, dict):
             return None
         required = set(_NARRATIVE_SCHEMA.get("required", ()))
-        if not required.issubset(value):
+        if set(value) != required:
             return None
         if not isinstance(value.get("technical_reasoning"), str) or not isinstance(value.get("cab_reasoning"), str):
             return None
@@ -555,7 +555,7 @@ class AgenticReasoningLoop:
                 temperature=0.0,
             )
         final_response = critique or initial
-        nlg_mode = (os.getenv("PRE_CAB_NLG_MODE") or "refine").strip().lower()
+        nlg_mode = (os.getenv("PRE_CAB_NLG_MODE") or "off").strip().lower()
         if nlg_mode not in {"off", "refine"}:
             nlg_mode = "refine"
 
