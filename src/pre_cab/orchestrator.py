@@ -46,7 +46,7 @@ def _parse_brain_payload(text: str) -> dict[str, Any] | None:
 def _brain_decision(reasoning: ReasoningLoopResult | None) -> tuple[Decision | None, dict[str, Any] | None]:
     if reasoning is None:
         return None, None
-    response = reasoning.critique or reasoning.initial
+    response = reasoning.final or reasoning.critique or reasoning.initial
     payload = _parse_brain_payload(response.text)
     if not payload:
         return None, None
