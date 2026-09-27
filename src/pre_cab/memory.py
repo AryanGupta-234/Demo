@@ -99,6 +99,7 @@ class InMemoryUnifiedMemory:
         def combined_score(record: MemoryRecord) -> float:
             lexical = lexical_score(record)
             semantic = 0.0
+            haystack = f"{record.text} {record.metadata}".lower()
             if query_vector is not None:
                 vector = self._vectors.get(record.memory_id)
                 if vector is not None:
