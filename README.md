@@ -2,6 +2,8 @@
 
 Model-independent proof of concept for validating **Normal** ServiceNow Change Requests before CAB.
 
+> **GitHub connection test:** README successfully updated through the connected GitHub integration.
+
 ## Current main test mode
 
 The current testing target is deliberately simple:
