@@ -40,6 +40,23 @@ _REASONING_SCHEMA = {
 }
 
 
+_NARRATIVE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "technical_reasoning": {"type": "string"},
+        "cab_reasoning": {"type": "string"},
+        "cab_questions": {"type": "array", "items": {"type": "string"}},
+        "recommendations": {"type": "array", "items": {"type": "string"}},
+        "self_critique": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "technical_reasoning", "cab_reasoning", "cab_questions",
+        "recommendations", "self_critique",
+    ],
+}
+
+
 _DESCRIPTIVE_FIELDS = (
     "Short description", "Description", "Justification", "Implementation plan",
     "Change plan", "Backout plan", "Work notes", "Comments", "Test plan",
@@ -412,6 +429,24 @@ class AgenticReasoningLoop:
         recommendations = value.get("recommendations")
         if not isinstance(recommendations, list) or len(recommendations) > 4:
             return None
+        return value
+
+    @staticmethod
+    def _parse_narrative(text: str) -> dict[str, Any] | None:
+        try:
+            value = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(value, dict):
+            return None
+        required = set(_NARRATIVE_SCHEMA.get("required", ()))
+        if not required.issubset(value):
+            return None
+        if not isinstance(value.get("technical_reasoning"), str) or not isinstance(value.get("cab_reasoning"), str):
+            return None
+        for key in ("cab_questions", "recommendations", "self_critique"):
+            if not isinstance(value.get(key), list) or not all(isinstance(item, str) for item in value[key]):
+                return None
         return value
 
     def _should_critique(self, response: ModelResponse) -> bool:
