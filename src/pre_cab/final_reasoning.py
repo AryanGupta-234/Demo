@@ -168,6 +168,6 @@ def run_final_reasoning(
     except (RuntimeError, ValueError, OSError) as exc:
         return FinalReasoningResult(None, None, None, f"{type(exc).__name__}: {exc}")
 
-    response = reasoning.critique or reasoning.initial
+    response = reasoning.final or reasoning.critique or reasoning.initial
     prediction, payload = _parse(response.text)
     return FinalReasoningResult(reasoning, prediction, payload, None)
