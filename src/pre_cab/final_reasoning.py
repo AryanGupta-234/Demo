@@ -159,6 +159,7 @@ def run_final_reasoning(
         strictness=strictness,
         evidence=_evidence_context(cr, stage2, documents),
         prior_findings=tuple(validation.findings + (stage2.findings if stage2 else [])),
+        agent_state=dict(validation.metadata.get("agent_blackboard") or {}),
     )
     try:
         reasoning = AgenticReasoningLoop(model=model, memory=memory).run(
