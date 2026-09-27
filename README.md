@@ -6,49 +6,37 @@ Model-independent proof of concept for validating **Normal** ServiceNow Change R
 
 ## Current main test mode
 
-The current testing target is deliberately simple:
+The current testing target is the local multi-level Pre-CAB pipeline:
 
 ```text
-Manual CR JSON
-      ↓
-Pre-CAB deterministic specialist agents
-      ↓
-Unified local memory
-      ↓
-GPT-OSS 120B API reasoning brain
-      ↓
+CR JSON
+  ↓
+Level 1 — deterministic CR/rule validation + specialist agents
+  ↓
+Level 2 — automatic CR evidence workspace + attachment discovery/extraction
+  ↓
+Level 3 — document evidence agents + Qwen/Ollama final reasoning
+  ↓
 Conservative decision gate
-      ↓
+  ↓
 PASS / CONDITIONAL / NOT_READY
 ```
 
-**One command** runs the whole brain. ServiceNow fetching and attachment/file-management are upstream inputs and are intentionally not required for this current test. Attachment processing remains implemented but can be enabled later when the upstream CR workspace is attached.
-
-Prepare an environment variable for one of the GPT-OSS 120B API routes:
+**One command runs the whole pipeline.** No attachment or evidence flag is required for the normal workflow.
 
 ```powershell
-$env:GROQ_API_KEY="YOUR_GROQ_KEY"
+python main.py "C:\path\to\one_cr.json" --provider ollama
 ```
 
-or:
+The runner automatically initializes local memory/audit storage and automatically resolves an evidence workspace by checking the CR JSON location and common `evidence/` / `attachments/` directories. If a CR-specific workspace already exists, it is reused; otherwise `evidence\<CR number>\` is created automatically. Any supported PDF/XLSX/TXT/CSV/EML/etc. evidence already present there is extracted, classified, verified, and passed into the final reasoning stage.
 
-```powershell
-$env:HF_TOKEN="YOUR_HUGGING_FACE_TOKEN"
-```
+No synthetic approval/UAT document is generated automatically. Missing evidence remains missing rather than being fabricated for a PASS decision.
 
-Then give the runner a JSON file containing **exactly one CR record**:
-
-```powershell
-python main.py "C:\path\to\one_cr.json"
-```
-
-Defaults are `Balanced` strictness and `auto` GPT-OSS 120B provider routing. The command automatically initializes local unified memory and audit storage, runs the specialist preprocessing agents, executes the GPT-OSS reasoning brain, applies the conservative reconciliation gate, prints a CAB-friendly + technical result, and saves a machine-readable JSON result under `artifacts/`.
-
-Optional controls are still available when needed:
+Optional controls remain available for testing and integration:
 
 ```powershell
 python main.py "C:\path\to\one_cr.json" --strictness strict
-python main.py "C:\path\to\one_cr.json" --provider groq
+python main.py "C:\path\to\one_cr.json" --provider ollama --attachment-root "C:\controlled\ServiceNow"
 ```
 
 ## Scope
@@ -56,7 +44,7 @@ python main.py "C:\path\to\one_cr.json" --provider groq
 - Normal CRs are the primary supported change type.
 - Emergency CRs are intentionally out of scope for V1.
 - Standard CRs are secondary.
-- GPT-OSS 120B is the only V1 reasoning model; Groq is the primary inference route and Hugging Face Inference Providers is an alternate route for the same model.
+- Qwen 2.5 7B Instruct via local Ollama is the current reasoning model path; the provider gateway remains extensible.
 - The model gateway is provider-agnostic so the underlying inference provider/model can change without changing agent behavior.
 - Three configurable strictness profiles: Lenient, Balanced, Strict.
 - Unified memory combines structured, semantic, episodic, policy, evidence, and CAB-history knowledge.
