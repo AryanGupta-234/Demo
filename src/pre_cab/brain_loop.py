@@ -390,7 +390,20 @@ class AgenticReasoningLoop:
             value = json.loads(text)
         except (TypeError, json.JSONDecodeError):
             return None
-        return value if isinstance(value, dict) else None
+        if not isinstance(value, dict):
+            return None
+        required = set(_REASONING_SCHEMA.get("required", ()))
+        if not required.issubset(value):
+            return None
+        if str(value.get("prediction", "")).upper() not in {"PASS", "CONDITIONAL", "NOT_READY"}:
+            return None
+        try:
+            confidence = float(value.get("confidence"))
+        except (TypeError, ValueError):
+            return None
+        if not 0.0 <= confidence <= 1.0:
+            return None
+        return value
 
     def _should_critique(self, response: ModelResponse) -> bool:
         if self.mode == "dual":
