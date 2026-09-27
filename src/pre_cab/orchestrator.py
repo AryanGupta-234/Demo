@@ -7,7 +7,6 @@ from typing import Any
 
 from .agents import DEFAULT_AGENT_TYPES, AgentResult
 from .agent_intelligence import build_agent_intelligence
-from .agent_intelligence import build_agent_intelligence
 from .brain_loop import AgenticReasoningLoop, ReasoningLoopResult
 from .decision import validate_fields
 from .memory import UnifiedMemory
@@ -115,7 +114,7 @@ def run_stage1(
     # Field Agent owns model-context selection. All other agents continue to see
     # the complete normalized CR, while GPT-OSS receives only decision-relevant
     # fields plus the specialist findings below.
-    agent_intelligence = build_agent_intelligence(results)
+    agent_intelligence = agent_council
     field_notes = next((r.notes for r in results if r.agent == "field"), {})
     selected_cr = field_notes.get("selected_cr") if isinstance(field_notes, dict) else None
     if not isinstance(selected_cr, dict) or not selected_cr:
