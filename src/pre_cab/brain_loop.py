@@ -16,7 +16,29 @@ from .sanitization import sanitize_cr_for_reasoning, sanitize_value
 from .rules import change_profile, contradiction_signals, effective_environment, evidence_matrix, model_field_validation, non_prod_validation_state
 from .schemas import AgentContext, Finding
 
-_JSON_OBJECT_FORMAT = {"type": "json_object"}
+_REASONING_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "prediction": {"type": "string", "enum": ["PASS", "CONDITIONAL", "NOT_READY"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "facts": {"type": "array", "items": {"type": "string"}},
+        "inferences": {"type": "array", "items": {"type": "string"}},
+        "uncertainties": {"type": "array", "items": {"type": "string"}},
+        "contradictions": {"type": "array", "items": {"type": "string"}},
+        "technical_reasoning": {"type": "string"},
+        "cab_reasoning": {"type": "string"},
+        "cab_questions": {"type": "array", "items": {"type": "string"}},
+        "recommendations": {"type": "array", "items": {"type": "string"}},
+        "self_critique": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "prediction", "confidence", "facts", "inferences", "uncertainties",
+        "contradictions", "technical_reasoning", "cab_reasoning", "cab_questions",
+        "recommendations", "self_critique",
+    ],
+}
+
 
 _DESCRIPTIVE_FIELDS = (
     "Short description", "Description", "Justification", "Implementation plan",
@@ -41,7 +63,7 @@ class ReasoningLoopResult:
     critique: ModelResponse | None
     retrieved_memory: tuple[dict[str, Any], ...]
     questions: tuple[str, ...]
-    mode: str = "single"
+    mode: str = "adaptive"
 
 
 class AgenticReasoningLoop:
@@ -51,9 +73,9 @@ class AgenticReasoningLoop:
         self.model = model
         self.memory = memory
         self.limit = limit
-        self.mode = (mode or os.getenv("PRE_CAB_REASONING_MODE") or "single").strip().lower()
-        if self.mode not in {"single", "dual"}:
-            raise ValueError("PRE_CAB_REASONING_MODE must be 'single' or 'dual'")
+        self.mode = (mode or os.getenv("PRE_CAB_REASONING_MODE") or "adaptive").strip().lower()
+        if self.mode not in {"single", "dual", "adaptive"}:
+            raise ValueError("PRE_CAB_REASONING_MODE must be 'single', 'dual', or 'adaptive'")
         effort = (os.getenv("PRE_CAB_REASONING_EFFORT") or "medium").strip().lower()
         if effort not in {"low", "medium", "high"}:
             effort = "medium"
@@ -271,18 +293,69 @@ class AgenticReasoningLoop:
         )
         return payload
 
-    def run(self, context: AgentContext, findings: list[Finding] | None = None) -> ReasoningLoopResult:
-        payload = self._build_payload(context, findings)
-        initial = self.model.generate(
-            system=build_reasoning_system_prompt(),
-            user=json.dumps(payload, ensure_ascii=False, default=str),
-            temperature=0.05,
-            response_format=_JSON_OBJECT_FORMAT,
+    @staticmethod
+    def _parse_initial(text: str) -> dict[str, Any] | None:
+        try:
+            value = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def _should_critique(self, response: ModelResponse) -> bool:
+        if self.mode == "dual":
+            return True
+        if self.mode == "single":
+            return False
+        payload = self._parse_initial(response.text)
+        if not payload:
+            return True
+        prediction = str(payload.get("prediction", "")).upper()
+        try:
+            confidence = float(payload.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return (
+            prediction != "PASS"
+            or bool(payload.get("contradictions"))
+            or bool(payload.get("uncertainties"))
+            or confidence < 0.88
+        )
+
+    def _generate(self, *, system: str, user: str) -> ModelResponse:
+        response = self.model.generate(
+            system=system,
+            user=user,
+            temperature=0.03,
+            response_format=_REASONING_SCHEMA,
             reasoning_effort=self.reasoning_effort,
         )
+        if self._parse_initial(response.text) is not None:
+            return response
+
+        # One bounded repair pass prevents malformed small-model output from
+        # poisoning the rest of the decision chain.
+        repair_user = json.dumps({
+            "invalid_response": response.text[:12000],
+            "instruction": "Return the same analysis as ONE valid JSON object matching the supplied schema. Do not add commentary outside JSON.",
+        }, ensure_ascii=False)
+        repaired = self.model.generate(
+            system=system + " Your previous response failed schema validation. Repair it without inventing new evidence.",
+            user=repair_user,
+            temperature=0.0,
+            response_format=_REASONING_SCHEMA,
+            reasoning_effort=self.reasoning_effort,
+        )
+        return repaired
+
+    def run(self, context: AgentContext, findings: list[Finding] | None = None) -> ReasoningLoopResult:
+        payload = self._build_payload(context, findings)
+        initial = self._generate(
+            system=build_reasoning_system_prompt(),
+            user=json.dumps(payload, ensure_ascii=False, default=str),
+        )
         critique = None
-        if self.mode == "dual":
-            critique = self.model.generate(
+        if self._should_critique(initial):
+            critique = self._generate(
                 system=build_reasoning_system_prompt() + " You are an independent adversarial reviewer. Return valid JSON using the same output contract and revise the prediction when warranted.",
                 user=json.dumps({
                     "original_context": payload,
@@ -296,7 +369,7 @@ class AgenticReasoningLoop:
                     },
                 }, ensure_ascii=False, default=str),
                 temperature=0.0,
-                response_format=_JSON_OBJECT_FORMAT,
+                response_format=_REASONING_SCHEMA,
                 reasoning_effort=self.reasoning_effort,
             )
         memory_cr = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
