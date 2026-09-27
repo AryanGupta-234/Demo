@@ -48,37 +48,96 @@ def _evidence_context(
 ) -> list[dict[str, Any]]:
     if stage2 is None:
         return []
-    chunks = retrieve_evidence_chunks(cr, documents or [], limit=10)
-    return [
-        {
-            "decision": stage2.decision.value,
-            "confidence": stage2.confidence,
-            "verified": stage2.verified,
-            "contradictions": list(stage2.contradictions),
-            "documents_considered": list(stage2.documents_considered),
-            "findings": [
-                {
-                    "code": finding.code,
-                    "severity": finding.severity.value,
-                    "message": finding.message,
-                    "technical_detail": finding.technical_detail,
-                    "evidence_refs": list(finding.evidence_refs),
-                }
-                for finding in stage2.findings
-            ],
-            "ranked_attachment_excerpts": [
-                {
-                    "document_ref": chunk.document_ref,
-                    "document_name": chunk.document_name,
-                    "chunk_index": chunk.chunk_index,
-                    "score": chunk.score,
-                    "matched_terms": list(chunk.matched_terms),
-                    "text": chunk.text,
-                }
-                for chunk in chunks
-            ],
-        }
-    ]
+    chunks = retrieve_evidence_chunks(cr, documents or [], limit=12)
+    return [{
+        "decision": stage2.decision.value,
+        "confidence": stage2.confidence,
+        "verified": stage2.verified,
+        "contradictions": list(stage2.contradictions),
+        "documents_considered": list(stage2.documents_considered),
+        "findings": [
+            {
+                "code": f.code,
+                "severity": f.severity.value,
+                "message": f.message,
+                "technical_detail": f.technical_detail,
+                "evidence_refs": list(f.evidence_refs),
+            }
+            for f in stage2.findings
+        ],
+        "ranked_attachment_excerpts": [
+            {
+                "document_ref": c.document_ref,
+                "document_name": c.document_name,
+                "chunk_index": c.chunk_index,
+                "score": c.score,
+                "matched_terms": list(c.matched_terms),
+                "text": c.text,
+            }
+            for c in chunks
+        ],
+    }]
+
+
+def _model_has_material_signal(reasoning: FinalReasoningResult) -> bool:
+    if not reasoning.payload:
+        return False
+    payload = reasoning.payload
+    contradictions = payload.get("contradictions") or []
+    technical = str(payload.get("technical_reasoning") or "").lower()
+    return bool(contradictions) or any(
+        term in technical
+        for term in (
+            "rollback", "recovery", "outage", "downtime", "dependency",
+            "security exposure", "test execution", "failed", "failure",
+            "contradiction", "approval", "implementation gap", "impact mismatch",
+            "configuration drift", "evidence mismatch", "document mismatch",
+        )
+    )
+
+
+def reconcile_final_decision(
+    deterministic: Decision,
+    reasoning: FinalReasoningResult,
+) -> tuple[Decision, Finding | None]:
+    prediction = reasoning.model_prediction
+    if reasoning.error:
+        return deterministic, Finding(
+            code="FINAL_REASONING_UNAVAILABLE",
+            title="Supplementary reasoning unavailable",
+            severity=FindingSeverity.INFO,
+            message="Primary validation completed, but the optional reasoning pass was unavailable.",
+            technical_detail=reasoning.error,
+            recommendation="Retry the reasoning pass or complete human review.",
+        )
+    if reasoning.reasoning is not None and reasoning.payload is None:
+        return deterministic, Finding(
+            code="FINAL_REASONING_INVALID",
+            title="Supplementary reasoning response unusable",
+            severity=FindingSeverity.INFO,
+            message="The reasoning model responded, but its structured contract could not be validated.",
+            recommendation="Retry the reasoning pass or complete human review.",
+        )
+    if prediction is None or _DECISION_RANK[prediction] <= _DECISION_RANK[deterministic]:
+        return deterministic, None
+    if not _model_has_material_signal(reasoning):
+        return deterministic, None
+
+    payload = reasoning.payload or {}
+    recommendations = payload.get("recommendations") or []
+    rec_text = (
+        "; ".join(str(item) for item in recommendations[:3])
+        if isinstance(recommendations, list)
+        else str(recommendations)
+    )
+    return prediction, Finding(
+        code="FINAL_MODEL_DOWNGRADE",
+        title="Reasoning model identified additional evidence-aware CAB risk",
+        severity=FindingSeverity.BLOCKING if prediction == Decision.NOT_READY else FindingSeverity.WARNING,
+        message=str(payload.get("cab_reasoning") or "The final reasoning pass identified additional readiness risk."),
+        technical_detail=str(payload.get("technical_reasoning") or ""),
+        recommendation=rec_text,
+    )
 
 
 def run_final_reasoning(
@@ -91,11 +150,7 @@ def run_final_reasoning(
     memory: UnifiedMemory | None = None,
     documents: list[EvidenceDocument] | None = None,
 ) -> FinalReasoningResult:
-    """Run the one high-value GPT pass after deterministic/evidence validation.
-
-    GPT receives only ranked evidence excerpts, not whole large attachments. It can make readiness more
-    conservative but never override a deterministic blocker in the final reconciliation step.
-    """
+    """Run one final reasoning pass after CR and evidence gates."""
     if model is None:
         return FinalReasoningResult(None, None, None, None)
 
@@ -116,64 +171,3 @@ def run_final_reasoning(
     response = reasoning.critique or reasoning.initial
     prediction, payload = _parse(response.text)
     return FinalReasoningResult(reasoning, prediction, payload, None)
-
-
-def _model_has_material_signal(reasoning: FinalReasoningResult) -> bool:
-    """Require substantive model evidence before adding a new readiness penalty."""
-    if not reasoning.payload:
-        return False
-    payload = reasoning.payload
-    contradictions = payload.get("contradictions") or []
-    technical = str(payload.get("technical_reasoning") or "").lower()
-    material_terms = (
-        "rollback", "recovery", "outage", "downtime", "dependency", "security exposure",
-        "test execution", "failed", "failure", "contradiction", "approval", "implementation gap",
-        "impact mismatch", "configuration drift",
-    )
-    return bool(contradictions) or any(term in technical for term in material_terms)
-
-
-def reconcile_final_decision(
-    deterministic: Decision,
-    reasoning: FinalReasoningResult,
-) -> tuple[Decision, Finding | None]:
-    prediction = reasoning.model_prediction
-    if reasoning.error:
-        # Model availability must never turn a technically valid deterministic
-        # assessment into CONDITIONAL. The report should disclose the limitation,
-        # but readiness remains governed by the actual CR findings.
-        return deterministic, Finding(
-            code="FINAL_REASONING_UNAVAILABLE",
-            title="Supplementary reasoning unavailable",
-            severity=FindingSeverity.INFO,
-            message="The primary change validation completed, but the optional reasoning pass was unavailable.",
-            technical_detail=reasoning.error,
-            recommendation="A later reasoning pass may add context; no readiness change is made from this condition.",
-        )
-    if reasoning.reasoning is not None and reasoning.payload is None:
-        return deterministic, Finding(
-            code="FINAL_REASONING_INVALID",
-            title="Supplementary reasoning response unusable",
-            severity=FindingSeverity.INFO,
-            message="The primary change validation completed, but the supplementary reasoning response could not be validated.",
-            recommendation="A later reasoning pass may add context; no readiness change is made from this condition.",
-        )
-    if prediction is None or _DECISION_RANK[prediction] <= _DECISION_RANK[deterministic]:
-        return deterministic, None
-
-    # A model may add a more conservative result only when it can point to a
-    # substantive contradiction or technical/readiness risk. Blank advisory
-    # metadata and unresolved-but-nonmaterial uncertainty are not sufficient.
-    if not _model_has_material_signal(reasoning):
-        return deterministic, None
-
-    payload = reasoning.payload or {}
-    recommendation = payload.get("recommendations") or []
-    return prediction, Finding(
-        code="FINAL_MODEL_DOWNGRADE",
-        title="GPT-OSS identified additional evidence-aware CAB risk",
-        severity=FindingSeverity.BLOCKING if prediction == Decision.NOT_READY else FindingSeverity.WARNING,
-        message=str(payload.get("cab_reasoning") or "The final reasoning pass identified additional risk."),
-        technical_detail=str(payload.get("technical_reasoning") or ""),
-        recommendation="; ".join(str(item) for item in recommendation[:3]) if isinstance(recommendation, list) else str(recommendation),
-    )
