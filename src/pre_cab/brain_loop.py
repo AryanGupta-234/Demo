@@ -512,7 +512,7 @@ class AgenticReasoningLoop:
                         system=build_narrative_system_prompt(),
                         user=json.dumps(narrative_input, ensure_ascii=False, default=str),
                         temperature=0.18,
-                        response_format={"type": "json_object"},
+                        response_format=_REASONING_SCHEMA,
                         reasoning_effort="low",
                     )
                     narrative = self._parse_initial(nlg.text)
