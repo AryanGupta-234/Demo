@@ -10,6 +10,7 @@ from typing import Any
 from pre_cab.audit_store import SQLiteAuditStore
 from pre_cab.env_loader import load_dotenv
 from pre_cab.local_attachments import SUPPORTED_SUFFIXES
+from pre_cab.memory import remember_validation_episode
 from pre_cab.input_loader import load_cr_records, normalize_cr_record, record_type, source_id
 from pre_cab.narrative import format_agent_chains, format_cab_result
 from pre_cab.pipeline import run_pre_cab
@@ -159,6 +160,23 @@ def main() -> int:
                 result.agent_results, result.stage1.findings,
                 result.stage1.metadata.get("brain") or {},
             )
+            profile = (
+                result.stage1.metadata.get("agent_notes", {})
+                .get("context", {})
+                .get("change_profile")
+                or {}
+            )
+            brain_payload = result.stage1.metadata.get("brain") or {}
+            remember_validation_episode(
+                memory,
+                canonical_cr,
+                decision=result.final_decision.value,
+                confidence=result.stage1.confidence,
+                findings=result.stage1.findings,
+                profile=profile,
+                reasoning_summary=str(brain_payload.get("cab_reasoning") or ""),
+            )
+
             run_id = audit.record(
                 cr_number=number,
                 strictness=args.strictness,
