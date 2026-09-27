@@ -403,6 +403,15 @@ class AgenticReasoningLoop:
             return None
         if not 0.0 <= confidence <= 1.0:
             return None
+        cab_reasoning = str(value.get("cab_reasoning") or "").strip()
+        technical_reasoning = str(value.get("technical_reasoning") or "").strip()
+        if len(cab_reasoning) < 45 or len(technical_reasoning) < 90:
+            return None
+        if cab_reasoning == technical_reasoning:
+            return None
+        recommendations = value.get("recommendations")
+        if not isinstance(recommendations, list) or len(recommendations) > 4:
+            return None
         return value
 
     def _should_critique(self, response: ModelResponse) -> bool:
