@@ -77,10 +77,27 @@ def run_stage1(
     stage1 = validate_fields(cr, strictness)
     context = AgentContext(cr=cr, strictness=strictness)
     results: list[AgentResult] = []
+    shared_state: dict[str, Any] = {}
 
     for agent_type in DEFAULT_AGENT_TYPES:
+        context = replace(context, agent_state=shared_state)
         agent = agent_type(model=model, memory=memory)
-        results.append(agent.run(context))
+        result = agent.run(context)
+        results.append(result)
+        # Publish compact specialist state for the next agent. Keep raw CR data out
+        # of the blackboard; it already lives in context.cr.
+        shared_state[result.agent] = {
+            "findings": [
+                {
+                    "code": finding.code,
+                    "severity": finding.severity.value,
+                    "message": finding.message,
+                }
+                for finding in result.findings[:12]
+            ],
+            "requirements": result.requirements[:12],
+            "notes": result.notes,
+        }
 
     merged = list(stage1.findings)
     for result in results:
@@ -176,6 +193,7 @@ def run_stage1(
             "stage_2_required": decision != Decision.NOT_READY,
             "agents": [result.agent for result in results],
             "agent_notes": agent_notes,
+            "agent_blackboard": shared_state,
             "reasoning_mode": reasoning.mode if reasoning is not None else "none",
             "reasoning_passes": (2 if reasoning and reasoning.critique is not None else (1 if reasoning else 0)),
             "model": getattr(model, "model_name", None),
