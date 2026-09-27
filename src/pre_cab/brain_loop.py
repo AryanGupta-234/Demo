@@ -264,6 +264,15 @@ class AgenticReasoningLoop:
         payload["retrieved_memory"] = compact_memory(list(payload.get("retrieved_memory") or []), limit=8)
         payload["prior_findings"] = compact_findings(list(payload.get("prior_findings") or []), limit=18)
         payload["strictness"] = context.strictness.value
+        payload["agent_blackboard"] = {
+            name: {
+                "findings": list((state or {}).get("findings", []))[:8],
+                "requirements": list((state or {}).get("requirements", []))[:8],
+                "notes": self._compact_agent_notes((state or {}).get("notes", {})),
+            }
+            for name, state in context.agent_state.items()
+            if isinstance(state, dict)
+        }
 
         learned = self._learned_knowledge()
         if learned is not None:
@@ -323,6 +332,15 @@ class AgenticReasoningLoop:
                 "array of concise answers to the self_critique_questions above — actually answer each "
                 "one for this CR, do not repeat the questions themselves back verbatim."
             ),
+            "nlg_quality": {
+                "cab_reasoning": "2-4 natural sentences, evidence-first, readable without technical jargon, no generic filler, no repeated conclusion.",
+                "technical_reasoning": "4-8 precise sentences using field/evidence names and causal reasoning; distinguish observed facts from inference.",
+                "facts": "short evidence-grounded statements; never contain recommendations.",
+                "inferences": "explicitly derived from facts and applicable requirements.",
+                "uncertainties": "only unresolved or unverifiable items.",
+                "contradictions": "only conflicts supported by two or more current signals.",
+                "recommendations": "specific next actions, not generic review language.",
+            },
         }
         payload["instruction"] = (
             "Return ONLY one valid JSON object. Analyze the current CR first using the fixed schema, mapped requirements, "
@@ -341,9 +359,29 @@ class AgenticReasoningLoop:
             "was tested. cab_reasoning and technical_reasoning serve two different readers and are shown to both together — write "
             "cab_reasoning so a non-technical CAB member understands the decision and its business impact on its own, and "
             "write technical_reasoning so an engineer gets the specific field-level evidence behind it; do not make one "
-            "depend on the other to be understood."
+            "depend on the other to be understood. Use varied natural language, avoid repeating the same sentence or conclusion, "
+            "lead each rationale with observed evidence, and never use empty phrases such as 'further review is recommended' "
+            "unless the response names exactly what must be reviewed."
         )
         return payload
+
+    @staticmethod
+    def _compact_agent_notes(notes: Any) -> dict[str, Any]:
+        if not isinstance(notes, dict):
+            return {}
+        compact: dict[str, Any] = {}
+        for key, value in notes.items():
+            if key in {"selected_cr", "matches", "clone_candidates"}:
+                continue
+            if isinstance(value, str):
+                compact[key] = value[:1200]
+            elif isinstance(value, list):
+                compact[key] = value[:8]
+            elif isinstance(value, dict):
+                compact[key] = {str(k): v for k, v in list(value.items())[:20]}
+            elif isinstance(value, (bool, int, float)) or value is None:
+                compact[key] = value
+        return compact
 
     @staticmethod
     def _parse_initial(text: str) -> dict[str, Any] | None:
@@ -373,11 +411,11 @@ class AgenticReasoningLoop:
             or confidence < 0.88
         )
 
-    def _generate(self, *, system: str, user: str) -> ModelResponse:
+    def _generate(self, *, system: str, user: str, temperature: float = 0.03) -> ModelResponse:
         response = self.model.generate(
             system=system,
             user=user,
-            temperature=0.03,
+            temperature=temperature,
             response_format=_REASONING_SCHEMA,
             reasoning_effort=self.reasoning_effort,
         )
@@ -421,8 +459,6 @@ class AgenticReasoningLoop:
                     },
                 }, ensure_ascii=False, default=str),
                 temperature=0.0,
-                response_format=_REASONING_SCHEMA,
-                reasoning_effort=self.reasoning_effort,
             )
         memory_cr = context.llm_cr if isinstance(context.llm_cr, dict) and context.llm_cr else context.cr
         clean_memory_cr = compact_cr(sanitize_cr_for_reasoning(memory_cr))
