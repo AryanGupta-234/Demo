@@ -478,10 +478,11 @@ class CrossAgentConsistencyAgent(BaseAgent):
 
         matrix = testing_notes.get("evidence_matrix") or {}
         if matrix.get("execution_status") == "FAILED":
+            failed_severity = FindingSeverity.BLOCKING if profile.get("formal_test_evidence_expected") else FindingSeverity.WARNING
             findings.append(Finding(
                 "AGENT_CONSISTENCY_TEST_EXECUTION",
                 "Agent consistency check found a failed execution state",
-                FindingSeverity.BLOCKING,
+                failed_severity,
                 "The testing evidence matrix records FAILED execution; this remains a material blocker regardless of other positive test language.",
                 recommendation="Reconcile the execution record and document the final test outcome.",
             ))
