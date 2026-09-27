@@ -314,6 +314,7 @@ class AgenticReasoningLoop:
                 "never_copy_a_historical_prediction_to_the_current_CR": True,
                 "delta_validate_any_similar_pattern": True,
             }
+        payload["agent_intelligence"] = sanitize_value(context.agent_insights or {})
         payload["field_selection"] = {
             "selected_field_count": len(selected_cr),
             "selected_fields": list(selected_cr.keys()),
