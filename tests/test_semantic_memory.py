@@ -44,3 +44,23 @@ def test_semantic_vectors_are_persistent(tmp_path: Path) -> None:
     reopened = SemanticSQLiteUnifiedMemory(path, embedding_provider=FakeEmbeddingProvider())
     assert reopened.search("rollback database", kinds=[MemoryKind.FACT], limit=1)[0].memory_id == "r1"
     assert cosine_similarity([1.0, 1.0], [1.0, 1.0]) == 2.0
+
+
+class AlternateEmbeddingProvider(FakeEmbeddingProvider):
+    model_name = "alternate-local"
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[0.0, 0.0, 1.0] for _ in texts]
+
+
+def test_memory_does_not_mix_embedding_models(tmp_path: Path) -> None:
+    path = tmp_path / "memory.db"
+    first = SemanticSQLiteUnifiedMemory(path, embedding_provider=FakeEmbeddingProvider())
+    first.remember(MemoryRecord("r1", MemoryKind.FACT, "rollback database", {}))
+
+    alternate = SemanticSQLiteUnifiedMemory(path, embedding_provider=AlternateEmbeddingProvider())
+    results = alternate.search("rollback database", kinds=[MemoryKind.FACT], limit=1)
+
+    # The old vector is ignored; the alternate model must backfill its own vector.
+    assert results
+    assert results[0].memory_id == "r1"
