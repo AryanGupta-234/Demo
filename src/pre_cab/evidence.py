@@ -67,11 +67,29 @@ def _has_positive_uat(text: str) -> bool:
 
 
 def _test_result_state(text: str) -> str:
+    """Resolve the most recent explicit execution state instead of any historical word hit."""
     normalized = _norm(text)
-    if any(term in normalized for term in ("test failed", "testing failed", "failed", "not passed", "execution failed")):
-        return "failed"
-    if ("expected result" in normalized and "actual result" in normalized) or any(term in normalized for term in ("test passed", "tests passed", "testing passed", "execution passed", "all test cases passed")):
-        return "passed"
+    patterns = (
+        ("failed", r"\b(?:test|testing|execution|validation)(?:\s+result)?\s*(?:is|was|:)?\s*(?:failed|failure|not passed)\b"),
+        ("passed", r"\b(?:test|testing|execution|validation)(?:\s+result)?\s*(?:is|was|:)?\s*(?:passed|pass|successful|success)\b"),
+        ("failed", r"\b(?:failed|not passed|execution failed|testing failed)\b"),
+        ("passed", r"\b(?:all tests? passed|tests passed|test cases passed|execution passed)\b"),
+    )
+    matches: list[tuple[int, str]] = []
+    for state, pattern in patterns:
+        matches.extend((match.start(), state) for match in re.finditer(pattern, normalized))
+    if matches:
+        return max(matches, key=lambda item: item[0])[1]
+    if "expected result" in normalized and "actual result" in normalized:
+        # Expected/actual fields establish test evidence, but not pass/fail by themselves.
+        actual = re.search(r"actual result\s*[:=-]\s*([^\n|;]+)", normalized)
+        if actual:
+            value = actual.group(1)
+            if re.search(r"\b(pass|passed|successful|success|ok)\b", value):
+                return "passed"
+            if re.search(r"\b(fail|failed|failure|not passed)\b", value):
+                return "failed"
+        return "present"
     if any(term in normalized for term in ("test case", "test result", "execution result", "tested", "validated")):
         return "present"
     return "unknown"
