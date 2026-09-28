@@ -37,10 +37,13 @@ def _evidence_manifest(
     cr_number: str,
     documents: list[EvidenceDocument],
     classifications: list[dict[str, Any]],
+    *,
+    workspace_inventory: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "cr_number": cr_number,
-        "folder_created": True,
+        "workspace_present": bool(workspace_inventory is not None),
+        "inventory_count": len(workspace_inventory or []),
         "document_count": len(documents),
         "documents": [
             {
@@ -189,7 +192,7 @@ def run_pre_cab(
             "deterministic_final": deterministic_final.value,
             "final_decision": final_decision.value,
             "brain": payload,
-            "evidence_manifest": {**_evidence_manifest(number, deduped, classifications), "workspace_inventory": workspace_inventory},
+            "evidence_manifest": {**_evidence_manifest(number, deduped, classifications, workspace_inventory=workspace_inventory), "workspace_inventory": workspace_inventory},
             "decision_levels": {
                 "level_1_cr_gates": stage1_result.stage1.decision.value,
                 "level_2_evidence_gates": stage2.decision.value if stage2 else "NOT_RUN",
