@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 from .evidence import EvidenceDocument, EvidenceResult, verify_attachments
 from .evidence_workspace import load_and_classify, safe_cr_dir, stage_files
+from .local_attachments import inventory_workspace
 from .final_reasoning import FinalReasoningResult, reconcile_final_decision, run_final_reasoning
 from .input_loader import normalize_cr_record
 from .orchestrator import run_stage1
@@ -93,8 +94,9 @@ def run_pre_cab(
     classifications: list[dict[str, Any]] = []
     workspace_root: Path | None = None
 
+    workspace_inventory: list[dict[str, Any]] = []
     if attachment_root is not None:
-        workspace_root = Path(attachment_root).expanduser()
+        workspace_root = Path(attachment_root).expanduser().resolve()
         if evidence_files:
             stage_folder = stage_files(workspace_root, number, evidence_files)
             loaded, classifications = load_and_classify(workspace_root, number)
@@ -103,12 +105,17 @@ def run_pre_cab(
             # canonical CR folder; otherwise an empty folder would mask those files.
             loaded, classifications = load_and_classify(workspace_root, number)
             stage_folder = safe_cr_dir(workspace_root, number)
+        workspace_inventory = inventory_workspace(workspace_root, number)
         collected.extend(loaded)
         stage1_result.stage1.metadata["evidence_workspace"] = {
             "root": str(workspace_root),
             "cr_folder": str(stage_folder),
             "created_or_resolved": True,
             "files_supplied": len(list(evidence_files or [])),
+            "inventory": workspace_inventory,
+            "supported_files": sum(1 for item in workspace_inventory if item.get("supported")),
+            "unsupported_files": sum(1 for item in workspace_inventory if not item.get("supported")),
+            "oversized_files": sum(1 for item in workspace_inventory if item.get("status") == "too_large"),
         }
 
     # Deduplicate explicit and discovered evidence.
@@ -182,7 +189,7 @@ def run_pre_cab(
             "deterministic_final": deterministic_final.value,
             "final_decision": final_decision.value,
             "brain": payload,
-            "evidence_manifest": _evidence_manifest(number, deduped, classifications),
+            "evidence_manifest": {**_evidence_manifest(number, deduped, classifications), "workspace_inventory": workspace_inventory},
             "decision_levels": {
                 "level_1_cr_gates": stage1_result.stage1.decision.value,
                 "level_2_evidence_gates": stage2.decision.value if stage2 else "NOT_RUN",
@@ -199,5 +206,5 @@ def run_pre_cab(
         documents=deduped,
         final_reasoning=reasoning,
         agent_results=stage1_result.agent_results,
-        evidence_manifest=_evidence_manifest(number, deduped, classifications),
+        evidence_manifest={**_evidence_manifest(number, deduped, classifications), "workspace_inventory": workspace_inventory},
     )
