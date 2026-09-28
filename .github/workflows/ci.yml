@@ -2,7 +2,6 @@ name: pre-cab-ci
 
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
 
