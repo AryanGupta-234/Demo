@@ -142,15 +142,21 @@ class SemanticSQLiteUnifiedMemory:
     def _backfill(self, rows: list[tuple[Any, ...]], limit: int = 128) -> None:
         if not self.embedding_provider:
             return
-        missing = []
-        for memory_id, text, metadata_json in rows[:limit]:
-            with self._connect() as conn:
-                exists = conn.execute(
-                    "SELECT 1 FROM memory_vectors WHERE memory_id = ?",
-                    (memory_id,),
-                ).fetchone()
-            if not exists:
-                missing.append((memory_id, text))
+        candidates = rows[:limit]
+        if not candidates:
+            return
+        ids = [str(row[0]) for row in candidates]
+        placeholders = ",".join("?" for _ in ids)
+        model_name = str(getattr(self.embedding_provider, "model_name", "local"))
+        with self._connect() as conn:
+            existing = {
+                str(row[0])
+                for row in conn.execute(
+                    f"SELECT memory_id FROM memory_vectors WHERE model_name = ? AND memory_id IN ({placeholders})",
+                    (model_name, *ids),
+                ).fetchall()
+            }
+        missing = [(str(memory_id), text) for memory_id, text, _ in candidates if str(memory_id) not in existing]
         if not missing:
             return
         vectors = self._embed([text for _, text in missing])
@@ -173,10 +179,12 @@ class SemanticSQLiteUnifiedMemory:
         if not ids:
             return {}
         placeholders = ",".join("?" for _ in ids)
+        model_name = str(getattr(self.embedding_provider, "model_name", "local"))
         with self._connect() as conn:
             rows = conn.execute(
-                f"SELECT memory_id, dimension, vector FROM memory_vectors WHERE memory_id IN ({placeholders})",
-                tuple(ids),
+                f"SELECT memory_id, dimension, vector FROM memory_vectors "
+                f"WHERE model_name = ? AND memory_id IN ({placeholders})",
+                (model_name, *ids),
             ).fetchall()
         return {memory_id: _unpack(blob, int(dimension)) for memory_id, dimension, blob in rows}
 
