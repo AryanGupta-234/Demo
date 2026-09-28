@@ -83,6 +83,7 @@ def run_pre_cab(
 
     The model can add conservative findings but cannot override a deterministic blocker.
     """
+    evidence_files = list(evidence_files or [])
     canonical_cr = normalize_cr_record(cr)
     number = str(
         canonical_cr.get("Number")
@@ -114,7 +115,7 @@ def run_pre_cab(
             "root": str(workspace_root),
             "cr_folder": str(stage_folder),
             "created_or_resolved": True,
-            "files_supplied": len(list(evidence_files or [])),
+            "files_supplied": len(evidence_files),
             "inventory": workspace_inventory,
             "supported_files": sum(1 for item in workspace_inventory if item.get("supported")),
             "unsupported_files": sum(1 for item in workspace_inventory if not item.get("supported")),
