@@ -54,3 +54,23 @@ def test_pipeline_does_not_guess_unrelated_attachments(tmp_path: Path) -> None:
     result = run_pre_cab(cr, attachment_root=tmp_path, strictness=Strictness.BALANCED)
 
     assert result.documents == []
+
+
+def test_pipeline_accepts_generator_evidence_files_and_reports_inventory(tmp_path: Path) -> None:
+    cr = _normal_cr("CHG-DEMO-GEN")
+    source = tmp_path / "CHG-DEMO-GEN_UAT.txt"
+    source.write_text("CHG-DEMO-GEN UAT test cases expected result actual result PASS", encoding="utf-8")
+    unsupported = tmp_path / "CHG-DEMO-GEN_notes.bin"
+    unsupported.write_bytes(b"binary")
+
+    result = run_pre_cab(
+        cr,
+        attachment_root=tmp_path / "workspace",
+        evidence_files=(item for item in [source]),
+        strictness=Strictness.BALANCED,
+    )
+
+    assert len(result.documents) == 1
+    assert result.stage1.metadata["evidence_workspace"]["files_supplied"] == 1
+    inventory = result.evidence_manifest["workspace_inventory"]
+    assert any(item["name"] == "CHG-DEMO-GEN_UAT.txt" for item in inventory)
