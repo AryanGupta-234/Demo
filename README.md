@@ -721,7 +721,59 @@ Each run records:
 
 ---
 
-# 25. Scratch installation — Windows
+# 25. Installation — two options
+
+There are two supported installation paths.
+
+### Option A — automatic installer (recommended)
+
+The repository includes a single cross-platform installer:
+
+    install.py
+
+It automatically:
+
+1. checks that Python 3.11+ is available
+2. creates or reuses `.venv`
+3. upgrades pip/setuptools/wheel
+4. installs the complete `.[all,dev]` dependency set
+5. compiles the source and scripts
+6. runs the test suite
+7. prints the exact command to activate/run the environment
+
+#### Windows PowerShell
+
+    git clone https://github.com/AryanGupta-234/Demo.git
+    cd Demo
+    python install.py
+
+If `python` is not available but `py` is:
+
+    py install.py
+
+#### Linux / WSL
+
+    git clone https://github.com/AryanGupta-234/Demo.git
+    cd Demo
+    python3 install.py
+
+After installation:
+
+Windows:
+
+    .\\.venv\\Scripts\\Activate.ps1
+
+Linux / WSL:
+
+    source .venv/bin/activate
+
+The installer is intentionally non-destructive: an existing `.venv` is reused instead of deleted.
+
+### Option B — manual installation
+
+Use this when you want full control over every installation step.
+
+#### Windows
 
 Install Python 3.11+ and Git.
 
@@ -735,13 +787,10 @@ Clone:
     git clone https://github.com/AryanGupta-234/Demo.git
     cd Demo
 
-Create environment:
+Create and activate the environment:
 
     python -m venv .venv
-
-Activate:
-
-    .\.venv\Scripts\Activate.ps1
+    .\\.venv\\Scripts\\Activate.ps1
 
 If PowerShell blocks activation:
 
@@ -751,17 +800,15 @@ Upgrade tooling:
 
     python -m pip install --upgrade pip setuptools wheel
 
-Install everything:
+Install all runtime/document/API/embedding/test dependencies:
+
+    pip install -e ".[all,dev]"
+
+Equivalent repository requirements file:
 
     pip install -r requirements.txt
 
-Equivalent:
-
-    pip install -e ".[all]"
-
----
-
-# 26. Scratch installation — Linux / WSL
+#### Linux / WSL
 
 Ubuntu:
 
@@ -773,17 +820,34 @@ Clone:
     git clone https://github.com/AryanGupta-234/Demo.git
     cd Demo
 
-Environment:
+Create and activate:
 
     python3 -m venv .venv
     source .venv/bin/activate
 
-Install:
+Upgrade tooling:
 
     python -m pip install --upgrade pip setuptools wheel
+
+Install:
+
+    pip install -e ".[all,dev]"
+
+Or:
+
     pip install -r requirements.txt
 
----
+### What the installer does not install
+
+Ollama is a separate system application, not a Python dependency. Install it separately if you want local neural reasoning, then verify:
+
+    ollama list
+
+Example model:
+
+    ollama pull qwen2.5:7b-instruct
+
+The installer also does not create ServiceNow credentials or API keys. Those remain environment/deployment configuration.
 
 # 27. Selective installation
 
