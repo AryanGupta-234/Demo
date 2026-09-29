@@ -38,6 +38,29 @@ def venv_python() -> Path:
     return VENV / "bin" / "python"
 
 
+def activate_windows_terminal() -> None:
+    """Open a new Windows CMD session with the project venv activated.
+
+    A child process cannot modify the environment of the CMD/PowerShell process
+    that launched this installer. Therefore the reliable automatic behavior is
+    to open a new CMD window rooted at the repository with activate.bat run.
+    """
+    if os.name != "nt":
+        return
+
+    activate_bat = VENV / "Scripts" / "activate.bat"
+    if not activate_bat.exists():
+        return
+
+    print("\nOpening a new CMD window with .venv activated...")
+    command = f'cd /d "{ROOT}" && call "{activate_bat}"'
+    subprocess.Popen(
+        ["cmd.exe", "/k", command],
+        cwd=ROOT,
+        creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Install Pre-CAB Validator")
     parser.add_argument(
@@ -98,6 +121,7 @@ def main() -> int:
     print("=" * 72)
     if os.name == "nt":
         print("Activate : .\\.venv\\Scripts\\Activate.ps1")
+        print("CMD      : .\\.venv\\Scripts\\activate")
         print("Demo     : .\\.venv\\Scripts\\python.exe scripts\\demo.py")
         print("Full     : .\\install.py --full")
         print("Workspace: .\\data\\manager_demo")
@@ -115,6 +139,8 @@ def main() -> int:
     print("- API credentials are not created or stored by this installer.")
     print("- Ruff is optional developer tooling and is not required for installation or tests.")
     print("- Manager demo data and generated evidence are synthetic and contain no production data.")
+
+    activate_windows_terminal()
     return 0
 
 
