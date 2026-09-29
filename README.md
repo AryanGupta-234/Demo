@@ -853,6 +853,46 @@ Windows PowerShell example:
 
 ---
 
+# 31. Ollama model compatibility
+
+Ollama is treated as a runtime/provider boundary, not as a Qwen-only implementation.
+
+The provider accepts the model name from `OLLAMA_MODEL`, so the same Pre-CAB pipeline can use different Ollama models without changing the validation, evidence, memory, or final-gate code.
+
+Example:
+
+    $env:OLLAMA_MODEL="qwen2.5:7b-instruct"
+    python main.py ./data/one_cr.json --provider ollama
+
+Switching models:
+
+    $env:OLLAMA_MODEL="llama3.1:8b"
+    python main.py ./data/one_cr.json --provider ollama
+
+A fine-tuned/custom Ollama model can be selected the same way:
+
+    $env:OLLAMA_MODEL="pre-cab-qwen"
+    python main.py ./data/one_cr.json --provider ollama
+
+Compatibility depends on the capabilities of the selected model. The model should be suitable for the provider's chat/structured-output contract and have enough context for the configured workload. Context length, tool/function calling, JSON reliability and reasoning quality can vary by model.
+
+Important separation:
+
+    Ollama model
+        = neural reasoning / language realization
+
+    Deterministic validators + evidence gate
+        = authoritative safety/decision controls
+
+    Embedding model
+        = separate semantic-memory retrieval component
+
+Changing the Ollama generation model therefore does not change the deterministic Pre-CAB policy engine. A weaker or incompatible model may produce lower-quality reasoning, but it must not be able to override deterministic or evidence blockers.
+
+The repository's Qwen/QLoRA training path is an example model-specific training workflow; it is not a requirement of the Ollama provider itself.
+
+---
+
 # 31. Cloud provider
 
 Groq:
