@@ -101,17 +101,32 @@ def extract_text(path: Path) -> str:
     return ""
 
 
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def _cr_directory(root: Path, cr_number: str) -> Path | None:
     needle = cr_number.strip()
     if not needle:
         return None
+
+    root_resolved = root.resolve()
     direct = root / needle
-    if direct.is_dir():
-        return direct.resolve()
+    if direct.is_dir() and not direct.is_symlink():
+        resolved = direct.resolve()
+        if _inside(resolved, root_resolved):
+            return resolved
 
     for candidate in root.rglob(needle):
-        if candidate.is_dir() and candidate.name == needle:
-            return candidate.resolve()
+        if not candidate.is_dir() or candidate.is_symlink() or candidate.name != needle:
+            continue
+        resolved = candidate.resolve()
+        if _inside(resolved, root_resolved):
+            return resolved
     return None
 
 
@@ -127,14 +142,6 @@ def _root_attachments(root: Path, cr_number: str) -> list[Path]:
         if stem == needle or stem.startswith(f"{needle}_") or stem.startswith(f"{needle}-"):
             matches.append(path)
     return sorted(matches)
-
-
-def _inside(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except ValueError:
-        return False
 
 
 def discover_attachments(root: Path, cr_number: str) -> list[Path]:
