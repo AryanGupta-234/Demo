@@ -4,14 +4,18 @@ One-command installer for the Pre-CAB Validator.
 
 Usage:
     python install.py
+    python install.py --full
 
-The installer creates an isolated .venv, installs runtime/test dependencies,
-verifies the code, and prepares the synthetic manager-demo workspace including
-CR-scoped evidence folders and generated PDF evidence.
+Default mode installs only what is needed for the offline manager demo:
+document extraction, synthetic PDF generation, and the core validator.
+
+--full installs the complete development/AI/API dependency set and runs
+the full pytest suite.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import platform
 import subprocess
@@ -35,12 +39,21 @@ def venv_python() -> Path:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Install Pre-CAB Validator")
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Install the complete AI/API/development stack and run all tests.",
+    )
+    args = parser.parse_args()
+
     print("=" * 72)
     print("Pre-CAB Validator — One-Command Installer")
     print("=" * 72)
     print(f"Platform : {platform.system()} {platform.machine()}")
     print(f"Python   : {sys.version.split()[0]}")
     print(f"Project  : {ROOT}")
+    print(f"Mode     : {'FULL' if args.full else 'MANAGER DEMO'}")
 
     if sys.version_info < (3, 11):
         print("\nERROR: Python 3.11 or newer is required.")
@@ -66,29 +79,37 @@ def main() -> int:
     print("\n[2/5] Upgrading packaging tools...")
     run([str(py), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
 
-    print("\n[3/5] Installing application + test dependencies...")
-    run([str(py), "-m", "pip", "install", "-e", ".[all,dev]"])
+    extras = "all,dev" if args.full else "docs"
+    print(f"\n[3/5] Installing {('full' if args.full else 'manager-demo')} dependencies...")
+    run([str(py), "-m", "pip", "install", "-e", f".[{extras}]"])
 
     print("\n[4/5] Verifying the installation...")
     run([str(py), "-m", "compileall", "-q", "src", "scripts", "main.py"])
-    run([str(py), "-m", "pytest"])
 
-    print("\n[5/5] Preparing manager demo workspace...")
-    run([str(py), "scripts/setup_manager_demo.py"])
+    if args.full:
+        run([str(py), "-m", "pytest"])
+    else:
+        run([str(py), "scripts/setup_manager_demo.py"])
+        run([str(py), "scripts/demo.py"])
 
+    print("\n[5/5] Finalizing...")
     print("\n" + "=" * 72)
     print("INSTALLATION + DEMO SETUP COMPLETE")
     print("=" * 72)
     if os.name == "nt":
         print("Activate : .\\.venv\\Scripts\\Activate.ps1")
         print("Demo     : .\\.venv\\Scripts\\python.exe scripts\\demo.py")
+        print("Full     : .\\install.py --full")
         print("Workspace: .\\data\\manager_demo")
     else:
         print("Activate : source .venv/bin/activate")
         print("Demo     : .venv/bin/python scripts/demo.py")
+        print("Full     : .venv/bin/python install.py --full")
         print("Workspace: ./data/manager_demo")
 
     print("\nNotes:")
+    print("- Default mode is intentionally lightweight and does not install PyTorch/sentence-transformers.")
+    print("- --full installs semantic embeddings, LLM/API clients, and development/test dependencies.")
     print("- Ollama is an external application and is not installed by pip.")
     print("- The embedding model is downloaded on first use when semantic memory is enabled.")
     print("- API credentials are not created or stored by this installer.")
