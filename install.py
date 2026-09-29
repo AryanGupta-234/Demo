@@ -6,8 +6,9 @@ Usage:
     python install.py
 
 The installer creates an isolated .venv in the repository and installs the
-complete project dependency set (all runtime/document/API/embedding packages
-plus development/test tooling).
+complete runtime/document/API/embedding dependency set plus test tooling.
+Optional lint tooling such as Ruff is intentionally not required to run the
+application or test suite.
 """
 
 from __future__ import annotations
@@ -66,7 +67,7 @@ def main() -> int:
     print("\n[2/4] Upgrading packaging tools...")
     run([str(py), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
 
-    print("\n[3/4] Installing the complete dependency set...")
+    print("\n[3/4] Installing application + test dependencies...")
     run([str(py), "-m", "pip", "install", "-e", ".[all,dev]"])
 
     print("\n[4/4] Verifying the installation...")
@@ -87,6 +88,7 @@ def main() -> int:
     print("- Ollama is an external application and is not installed by pip.")
     print("- The embedding model is downloaded on first use when semantic memory is enabled.")
     print("- API credentials are not created or stored by this installer.")
+    print("- Ruff is optional developer tooling and is not required for installation or tests.")
     return 0
 
 
