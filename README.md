@@ -5,17 +5,55 @@ Local-first, evidence-aware validation and reasoning engine for Normal ServiceNo
 
 ## Current integration boundary
 
-This repository does NOT fetch CRs or attachments from ServiceNow.
+The repository preserves the **real ServiceNow integration boundary** while also providing a local/demo path.
 
-The current contract is:
+There are two supported ingestion modes:
 
-    ServiceNow / upstream fetcher
+    DEMO / LOCAL
+
+    local CR JSON + evidence/<CR number>/
+                    |
+                    v
+             this validator
+
+    REAL SERVICE NOW
+
+    ServiceNow REST API
              |
              v
-    private CR workspace
+    read-only API adapter
+             |
+             +--> CR fields
+             +--> attachment metadata
+             +--> attachment bytes
              |
              v
     this validator
+
+The production-facing integration structure is already present in:
+
+    src/pre_cab/servicenow.py
+        provider-neutral ServiceNowAdapter contract
+
+    src/pre_cab/servicenow_readonly.py
+        bounded GET-only ServiceNow REST client
+
+    scripts/validate_servicenow_change.py
+        real ServiceNow CR validation entrypoint
+
+The core validator remains independent of ServiceNow credentials and network behavior. The API adapter is responsible for authentication, CR retrieval and attachment retrieval; the validation pipeline remains responsible for validation, evidence verification, reasoning and the final gate.
+
+For the current local demonstration phase, downloaded files can still be placed under:
+
+    evidence/
+      CHG001234/
+        approval.pdf
+        uat.xlsx
+        implementation.docx
+        rollback.pptx
+        screenshot.png
+
+The validator reads only the requested CR workspace. It never uses a sibling CR's evidence as proof for the current CR.
 
 For the current phase, place downloaded files under:
 
@@ -1040,33 +1078,77 @@ The JSON includes:
 
 ---
 
-# 37. What this repository does NOT do yet
+# 37. Demo vs real production integration
 
-It does not own:
+The project deliberately keeps the **same core validator** behind both the demonstration path and the real ServiceNow path.
 
-- ServiceNow authentication
-- ServiceNow API fetching
-- attachment downloading
-- ServiceNow scheduling
-- upstream file lifecycle management
+| Area | Current demonstration | Real / production work |
+|---|---|---|
+| CR input | Local JSON fixture | ServiceNow REST CR retrieval |
+| Authentication | None required | ServiceNow credentials / approved auth mechanism |
+| Attachments | Local `evidence/<CR>/` folder | ServiceNow attachment API |
+| Document extraction | Local bounded extraction | Same extraction after API retrieval |
+| Level 1 validation | Real deterministic engine | Same |
+| Specialist agents | Real | Same |
+| Level 2 evidence verification | Real | Same |
+| Neural reasoning | Configurable local/cloud model | Same, subject to deployment/model policy |
+| Semantic memory | Local persistent store | Replaceable production persistence if required |
+| Audit | Local SQLite | Production audit store/integration if required |
+| ServiceNow writes | Not performed by read-only client | Explicitly implement/authorize separately if required |
 
-The intended integration is:
+### Real ServiceNow path already present
 
-    ServiceNow API
-         |
-         v
-    CR fetcher
-         |
-         v
-    attachment downloader
-         |
-         v
-    evidence/<CR number>/
-         |
-         v
-    Pre-CAB Validator
+The read-only client performs bounded GET operations for:
 
-That boundary should remain clean.
+    ServiceNow change_request
+            |
+            +--> CR fields
+            |
+            +--> attachment metadata
+            |
+            +--> attachment bytes
+            |
+            v
+    EvidenceDocument records
+            |
+            v
+    run_pre_cab(...)
+
+It includes retry handling for transient transport/429/5xx failures, authentication failure handling, attachment size limits, and in-memory attachment extraction. Credentials are read from environment variables and are not written into reports.
+
+Run a real ServiceNow CR validation with:
+
+    $env:SERVICENOW_BASE_URL="https://your-instance.service-now.com"
+    $env:SERVICENOW_USERNAME="..."
+    $env:SERVICENOW_PASSWORD="..."
+    python scripts/validate_servicenow_change.py CHG001234 --provider ollama
+
+The script is intentionally **read-only**. It does not approve the CR or write status/work notes back to ServiceNow.
+
+### What still needs organization-specific production work
+
+- approved authentication method (Basic is implemented as a controlled reference client; OAuth/service account may be required by the organization)
+- exact ServiceNow instance/table/query configuration
+- attachment retention/download policy
+- production secret management
+- production logging/observability
+- rate limits and enterprise retry policy
+- production audit persistence
+- authorization and network controls
+- optional, separately reviewed ServiceNow write-back workflow
+- enterprise scheduling/orchestration
+
+The clean boundary is:
+
+    ServiceNow adapter
+          |
+          v
+    normalized CR + evidence
+          |
+          v
+    Pre-CAB core
+
+The core must not contain ServiceNow credentials or depend on ServiceNow-specific network behavior.
 
 ---
 
