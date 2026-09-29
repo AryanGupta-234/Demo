@@ -18,7 +18,7 @@ def main() -> None:
     parser.add_argument("number")
     parser.add_argument("--strictness", choices=[s.value for s in Strictness], default="balanced")
     parser.add_argument("--llm", action="store_true")
-    parser.add_argument("--provider", choices=["auto", "groq", "huggingface"], default="auto")
+    parser.add_argument("--provider", choices=["auto", "groq", "huggingface", "ollama"], default="auto")
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--audit-db", type=Path, default=Path(".pre_cab/audit.sqlite3"))
     args = parser.parse_args()

@@ -1,257 +1,1307 @@
-# Pre-CAB Validator Demo
 
-Model-independent proof of concept for validating **Normal** ServiceNow Change Requests before CAB.
+# Pre-CAB Validator — Full System Guide
 
-> **GitHub connection test:** README successfully updated through the connected GitHub integration.
+Local-first, evidence-aware validation and reasoning engine for Normal ServiceNow Change Requests.
 
-## Current main test mode
+## Current integration boundary
 
-The current testing target is the local multi-level Pre-CAB pipeline:
+The repository preserves the **real ServiceNow integration boundary** while also providing a local/demo path.
 
-```text
-CR JSON
-  ↓
-Level 1 — deterministic CR/rule validation + specialist agents
-  ↓
-Level 2 — automatic CR evidence workspace + attachment discovery/extraction
-  ↓
-Level 3 — document evidence agents + Qwen/Ollama final reasoning
-  ↓
-Conservative decision gate
-  ↓
-PASS / CONDITIONAL / NOT_READY
-```
+There are two supported ingestion modes:
 
-**One command runs the whole pipeline.** No attachment or evidence flag is required for the normal workflow.
+    DEMO / LOCAL
 
-```powershell
-python main.py "C:\path\to\one_cr.json" --provider ollama
-```
+    local CR JSON + evidence/<CR number>/
+                    |
+                    v
+             this validator
 
-The runner automatically initializes local memory/audit storage and automatically resolves an evidence workspace by checking the CR JSON location and common `evidence/` / `attachments/` directories. If a CR-specific workspace already exists, it is reused; otherwise `evidence\<CR number>\` is created automatically. Any supported PDF/XLSX/TXT/CSV/EML/etc. evidence already present there is extracted, classified, verified, and passed into the final reasoning stage.
+    REAL SERVICE NOW
 
-The neural engine now uses adaptive self-critique, schema-constrained local generation, bounded malformed-output repair, and a separate language-realization pass. The model's decision/confidence are locked during NLG refinement, so language improvements cannot silently change the decision.
+    ServiceNow REST API
+             |
+             v
+    read-only API adapter
+             |
+             +--> CR fields
+             +--> attachment metadata
+             +--> attachment bytes
+             |
+             v
+    this validator
 
-Specialist agents now operate through a shared blackboard: context, technical, business-impact, testing and risk observations are handed forward and a final consistency agent checks for cross-agent disagreements and contradictions.
+The production-facing integration structure is already present in:
 
-Unified memory now combines FTS candidate retrieval with identifier-aware reranking, source/kind weighting, confidence, recency and usage signals. Each validation run can also be stored as a non-authoritative episodic memory, allowing later runs to retrieve prior failure patterns without treating past decisions as current evidence.
+    src/pre_cab/servicenow.py
+        provider-neutral ServiceNowAdapter contract
 
-No synthetic approval/UAT document is generated automatically. Missing evidence remains missing rather than being fabricated for a PASS decision.
+    src/pre_cab/servicenow_readonly.py
+        bounded GET-only ServiceNow REST client
 
-Optional controls remain available for testing and integration:
+    scripts/validate_servicenow_change.py
+        real ServiceNow CR validation entrypoint
 
-```powershell
-python main.py "C:\path\to\one_cr.json" --strictness strict
-python main.py "C:\path\to\one_cr.json" --provider ollama --attachment-root "C:\controlled\ServiceNow"
-```
+The core validator remains independent of ServiceNow credentials and network behavior. The API adapter is responsible for authentication, CR retrieval and attachment retrieval; the validation pipeline remains responsible for validation, evidence verification, reasoning and the final gate.
 
-## Scope
+For the current local demonstration phase, downloaded files can still be placed under:
 
-- Normal CRs are the primary supported change type.
-- Emergency CRs are intentionally out of scope for V1.
-- Standard CRs are secondary.
-- Qwen 2.5 7B Instruct via local Ollama is the current reasoning model path; the provider gateway remains extensible.
-- The model gateway is provider-agnostic so the underlying inference provider/model can change without changing agent behavior.
-- Three configurable strictness profiles: Lenient, Balanced, Strict.
-- Unified memory combines structured, semantic, episodic, policy, evidence, and CAB-history knowledge.
-- Multi-agent reasoning covers CR fields, context, technical impact, business/CAB impact, testing, evidence, risk, similarity/clone detection, and final decisioning.
-- Attachment analysis is a second-stage gate: claims in the CR are checked against supporting documents.
-- Final decisions are `PASS`, `CONDITIONAL`, or `NOT_READY`; the LLM provides reasoning, while deterministic policy gates protect critical approval logic.
+    evidence/
+      CHG001234/
+        approval.pdf
+        uat.xlsx
+        implementation.docx
+        rollback.pptx
+        screenshot.png
 
-## Use local CR JSON now
+The validator reads only the requested CR workspace. It never uses a sibling CR's evidence as proof for the current CR.
 
-The current workflow is deliberately local and API-free: provide one JSON export containing your
-CRs, including an export of roughly 5,000 records. The batch runner processes one record at a
-time, writes each result immediately as JSONL, and resumes safely after interruption. It does not
-call ServiceNow and does not require an attachment folder. Without attachments it performs
-metadata-only (Stage 1) screening, so missing documents do not incorrectly make every CR
-`NOT_READY`.
+For the current phase, place downloaded files under:
 
-```text
-python scripts/run_batch.py path/to/cr_export.json --output artifacts/cr_results.jsonl
-```
+    evidence/
+      CHG001234/
+        approval.pdf
+        uat.xlsx
+        implementation.docx
+        rollback.pptx
+        screenshot.png
 
-Supported JSON shapes are a top-level list or a nested export envelope such as
-`{"result": [...]}`, `{"records": [...]}`, `{"data": [...]}`, or `{"items": [...]}`. UTF-8
-files with or without a BOM are supported. Common field variants such as `change_number`,
-`short_description`, `implementation_plan`, `rollback_plan`, `cmdb_ci`, and `risk_level` are
-normalized automatically; original fields are preserved.
+The validator reads only the requested CR workspace. It never uses a sibling CR's evidence as proof for the current CR.
 
-Only Normal changes are validated by default. Each output line contains the CR number, decisions,
-confidence, finding codes, document count, and any per-record error. Re-run the same command to
-skip completed CRs. Use `--restart` to recreate the output from scratch, or
-`--include-non-normal` only if you intentionally want to run unsupported change types.
+---
 
-To validate one CR from the same export:
+## 1. Complete execution flow
 
-```text
-python scripts/validate_local_change.py path/to/cr_export.json CHG001234
-```
+    CR JSON
+      |
+      v
+    normalize input
+      |
+      v
+    LEVEL 1 — deterministic CR validation
+      |
+      +-- field requirements
+      +-- contextual applicability
+      +-- implementation
+      +-- rollback
+      +-- risk
+      +-- conflict
+      +-- testing
+      +-- specialist agents
+      +-- shared agent blackboard
+      |
+      v
+    Level-1 result finalized
+      |
+      v
+    CR-scoped evidence workspace
+      |
+      +-- inventory EVERY file
+      +-- identify supported/unsupported files
+      +-- extract supported documents
+      +-- record parser failures
+      +-- flag image/scanned evidence
+      |
+      v
+    LEVEL 2 — evidence verification
+      |
+      +-- current CR identity
+      +-- testing / UAT
+      +-- customer approval
+      +-- QA signoff
+      +-- lower-environment validation
+      +-- rollback corroboration
+      +-- contradictions
+      |
+      v
+    LEVEL 3 — neural reasoning
+      |
+      +-- semantic memory
+      +-- historical patterns
+      +-- specialist observations
+      +-- evidence excerpts
+      +-- uncertainty analysis
+      +-- adversarial critique
+      +-- structured JSON reasoning
+      +-- optional NLG realization
+      |
+      v
+    conservative final decision gate
+      |
+      +-- PASS
+      +-- CONDITIONAL
+      +-- NOT_READY
+      |
+      +------------------+
+      |                  |
+      v                  v
+    audit              memory
+                       |
+                       +-- episodic experience
+                       +-- reviewer feedback
+                       +-- semantic vectors
+                       +-- consolidation
 
-Attachments are optional for this phase. When you later provide the upstream file-management
-script, pass its prepared CR workspace with `--attachments <workspace>`; no API integration work
-is needed in this repository for the local-JSON workflow. Add `--full-validation` if you want
-evidence-aware Stage 2 validation (it is enabled automatically when `--attachments` is supplied).
+The important ordering is:
 
-## Future ingestion boundary
+    Level 1 -> evidence discovery/extraction -> Level 2 -> neural reasoning -> final gate
 
-The validator does **not** own the ServiceNow bulk-fetch or attachment-download workflow. The first integration layer is expected to fetch the CRs from ServiceNow and create the local CR workspace. Your existing API/file-management script can be used as that upstream input layer.
+---
 
-The contract is intentionally simple:
+## 2. Architecture by module
 
-```text
-ServiceNow API / fetcher
-        ↓
-fetch CR metadata + all attachments
-        ↓
-file-management layer
-        ↓
-private CR workspace
-        ├── CR001234/
-        │   ├── attachment-a.pdf
-        │   ├── test-results.xlsx
-        │   └── approval.pdf
-        ├── CR001235/
-        │   ├── uat.pdf
-        │   └── rollback.pdf
-        └── ...
-        ↓
-Pre-CAB Validator
-        ↓
-validation outputs
-```
+| Module | Responsibility |
+|---|---|
+| input_loader.py | Load and normalize CR exports |
+| decision.py | Deterministic CR validation |
+| field_requirement_engine.py | Data-driven contextual requirements |
+| agents.py | Specialist CR agents |
+| orchestrator.py | Agent orchestration and blackboard |
+| evidence_workspace.py | CR workspace resolution/classification |
+| local_attachments.py | File inventory and extraction |
+| evidence.py | Evidence verification |
+| evidence_agents.py | Document-purpose specialists |
+| evidence_retrieval.py | Relevant evidence excerpt retrieval |
+| brain.py | Reasoning contracts/prompts |
+| brain_loop.py | Reasoning, critique and NLG |
+| final_reasoning.py | Neural reconciliation |
+| semantic_memory.py | Persistent semantic memory |
+| memory_consolidation.py | Feedback and consolidation |
+| pipeline.py | Public Level 1 → Level 2 → Level 3 pipeline |
+| audit_store.py | Persistent audit trail |
+| reporting.py | CAB and technical output |
+| runtime_provider.py | Model provider bootstrap |
+| scripts/diagnose.py | Offline diagnostic |
 
-The validator treats each `<CR number>/` directory as the authoritative attachment boundary for that CR. It reads the files inside that directory and converts supported attachments into normalized evidence documents. It does not call ServiceNow, move/delete downloaded files, or inspect sibling CR folders. The upstream fetcher and file manager can therefore evolve independently of the validation algorithm.
+---
 
-For the current phase, manually placing PDFs/files into the same CR-specific directory structure is also supported. This is useful for testing the validator before the upstream ServiceNow fetcher is attached.
+# 3. Level 1 — CR validation
 
-Sensitive production CR exports and downloaded attachments must remain in the controlled local environment and must **not** be committed to this public repository.
+Level 1 is deterministic first.
 
-## Design principles
+It evaluates:
 
-1. Technical detail is preserved. CAB reviewers get a clear summary plus expandable technical findings.
-2. UAT is contextual, not universally mandatory. Requirements are inferred from the type and scope of the change.
-3. A rollback plan can pass when it establishes a credible recovery path even if the procedure is brief; detail affects quality/confidence.
-4. Similar historical CRs can become clone candidates, but clones always undergo delta validation.
-5. The benchmark measures GPT-OSS 120B capability before any fine-tuning so improvements remain measurable.
-6. Sensitive production data should not be committed to this public demo repository. Use synthetic data for demonstrations.
-7. The reasoning brain explicitly separates observed facts, inferences, uncertainties, contradictions and recommendations and performs self-critique when the selected reasoning mode requests it.
-8. Historical frequency is advisory evidence, not automatic policy. Governance rules remain explicit and reviewable.
-9. Free-tier operation favors local preprocessing/retrieval and one high-value GPT-OSS 120B synthesis pass rather than many independent model calls.
-10. Unreadable/scanned/image-only evidence is never silently treated as verified; it is surfaced for OCR/vision review.
+- CR type
+- short description
+- description
+- justification
+- implementation plan
+- backout plan
+- test plan
+- risk
+- configuration item
+- environment
+- conflict status
+- signoff dispositions
+- contextual requirements
+- work-note signals
 
-## Full validation and integration modes
+Finding severities:
 
-The one-command manual brain test above is the preferred current capability test. The broader repository also retains the full benchmark, evidence and integration tooling for later phases.
+    INFO
+    WARNING
+    BLOCKING
 
-### Local historical-data benchmark
+Decision mapping:
 
-Keep the real ServiceNow export outside Git. The benchmark preparation scripts read the local file, filter to Normal changes, remove outcome-bearing fields, and write sanitized model input plus a private ground-truth file.
+    BLOCKING -> NOT_READY
+    WARNING  -> CONDITIONAL
+    none     -> PASS
 
-```text
-python scripts/prepare_benchmark.py real_data/cr_export.json
-python scripts/profile_fields.py real_data/cr_export.json
-```
+The neural model is not required for this stage.
 
-### ServiceNow / CR workspace integration
+---
 
-When the upstream fetcher and file manager are attached, use a private workspace such as:
+# 4. Data-driven field requirements
 
-```text
-real_data/cr_workspace/
-├── CR001234/
-│   ├── cr.json
-│   ├── approval.pdf
-│   └── test-results.pdf
-├── CR001235/
-│   └── uat.xlsx
-└── ...
-```
+FieldRequirementEngine resolves rules in this order:
 
-The validator can then consume that directory per CR. The current main test does not require it.
+    exact Category + Sub Category
+            |
+            v
+    Category fallback
+            |
+            v
+    global fallback
 
-### Current API
+Requirement levels:
 
-- `GET /health`
-- `POST /v1/pre-cab/validate`
+    REQUIRED
+    CONDITIONAL
+    RECOMMENDED
+    OPTIONAL
+    NOT_OBSERVED
 
-The validation endpoint accepts the CR plus extracted attachment records. The response contains both `cab_view` and `technical_view`.
+Mined historical rules have an explicit lifecycle:
 
-## Current development state
+    CANDIDATE -> VALIDATED -> ACTIVE -> DEPRECATED
 
-### Implemented
+Historical frequency must not silently become policy.
 
-- Typed CR, finding, requirement and agent-context contracts.
-- Deterministic field validation and three strictness profiles.
-- Contextual UAT/customer-approval/outage applicability signals.
-- Credible rollback/recovery detection.
-- Hybrid retrieval baseline and clone/delta analysis.
-- Shared multi-agent context and configurable single/dual reasoning modes.
-- Groq GPT-OSS 120B adapter with structured-output/reasoning support.
-- Hugging Face GPT-OSS 120B adapter with provider-policy routing.
-- Free-tier inference budget guardrails and model-response caching.
-- Persistent local unified memory and replayable audit traces.
-- PDF/XLSX/text attachment adapters and Stage-2 evidence verification.
-- Claim/evidence verification and contradiction detection.
-- Explicit unreadable/image/scanned evidence findings.
-- Ranked evidence excerpts passed to final GPT synthesis.
-- CAB + technical reporting and stable pipeline/API contracts.
-- Read-only ServiceNow ingestion boundary with bounded retries, timeouts, and attachment-size limits.
-- Leakage-safe Normal-CR benchmark preparation.
-- Field population/dependency profiling from a local ServiceNow export.
-- Reasoning-rich fine-tuning candidate generation with deterministic splits.
-- Synthetic Normal-CR and attachment fixtures.
-- Lightweight manager-demo dashboard.
-- CI/test scaffolding.
-- Benchmark dataset fingerprints, manifests and layer-ablation tooling.
-- Reviewed requirement-level evaluation framework with per-label precision/recall/F1 and reviewer feedback/episodic-memory path.
-- Explicit private CR-workspace handoff: the validator consumes one CR directory's downloaded attachments without owning upstream ServiceNow file management.
-- One-command API-backed manual CR brain runner (`python main.py <one_cr.json>`).
+---
 
-## Capability benchmark sequence
+# 5. Specialist agents
 
-Run entirely locally against the controlled historical dataset when benchmark testing is needed:
+The CR is inspected by specialist agents including:
 
-1. Profile the Normal-CR schema and population patterns.
-2. Normalize historical CAB outcomes into benchmark labels.
-3. Remove outcome-bearing and post-decision fields from model input.
-4. Build a fixed evaluation set and keep it hidden from prompt/memory during prediction.
-5. Run deterministic Stage 1 first.
-6. Compare memory/clone, evidence, and GPT-OSS 120B layers with the same seed/sample.
-7. Measure accuracy, false-pass rate, false-fail rate, requirement-inference accuracy, evidence verification and clone quality.
-8. Inspect failure cases and improve rules/retrieval/prompts before considering fine-tuning.
-9. Fit/validate confidence calibration only after enough reviewed outcomes exist.
+- Field
+- Context
+- Technical
+- Business Impact
+- Testing
+- Risk
+- Evidence
+- Clone/Similarity
+- Cross-Agent Consistency
 
-The real-data execution itself should happen in the user's controlled environment; the public repository contains only the benchmark tooling and synthetic fixtures.
+Agents publish compact findings, requirements and observations to a shared blackboard.
 
-## Fine-tuning path
+The blackboard is advisory. Deterministic policy remains authoritative.
 
-Fine-tuning is deliberately deferred until the baseline benchmark is understood. The repository already contains a reviewable reasoning-example builder, but no model weights are changed by it.
+Conceptually:
 
-Future paid path:
+    Context
+       |
+       v
+    Technical
+       |
+       v
+    Testing
+       |
+       v
+    Business
+       |
+       v
+    Risk
+       |
+       v
+    Consistency
 
-```text
-Benchmark baseline
-    ↓
-Improve rules / retrieval / prompts
-    ↓
-Build reviewed reasoning examples
-    ↓
-Train / fine-tune GPT-OSS 120B
-    ↓
-Evaluate on untouched test set
-    ↓
-Compare against baseline
-```
+---
 
-## Repository layout
+# 6. Evidence workspace
 
-```text
-main.py                One-command API-backed manual CR brain test
-src/pre_cab/           Agents, reasoning, decisioning, documents, memory,
-                       model providers, retrieval, similarity, reporting and API
-data/demo/             Synthetic demo dataset only
-config/                Explicit Normal-CR governance rules
-scripts/               Integration, benchmark and evaluation utilities
-tests/                 Unit and integration regression tests
-```
+After Level 1 is finalized, the pipeline resolves the CR evidence workspace.
+
+Preferred structure:
+
+    evidence/
+      CHG001234/
+        approval.pdf
+        test-results.xlsx
+        implementation.docx
+        rollback.pptx
+        screenshot.png
+
+The system also supports the older root-level CR-prefixed layout for compatibility.
+
+The validator never guesses evidence from another CR.
+
+---
+
+# 7. Every file is inventoried
+
+A major hardening change is that inventory is separate from extraction.
+
+Every file in the CR workspace is visible in the evidence manifest.
+
+Possible statuses include:
+
+    supported
+    unsupported
+    too_large
+    stat_error
+
+This distinction matters:
+
+    "not parsed"
+       !=
+    "does not exist"
+
+Unsupported files therefore cannot disappear silently.
+
+---
+
+# 8. Supported formats
+
+Current extraction supports:
+
+Documents:
+- PDF
+- DOCX
+- PPTX
+- TXT
+- Markdown
+- CSV
+- EML
+- JSON
+
+Spreadsheets:
+- XLSX
+- XLSM
+
+Images:
+- PNG
+- JPG/JPEG
+- WEBP
+- BMP
+- TIFF
+
+Images are retained as evidence and marked for visual review because text extraction cannot establish their contents.
+
+---
+
+# 9. Attachment safety
+
+Default per-file extraction limit:
+
+    75 MiB
+
+Configure:
+
+Windows PowerShell:
+
+    $env:PRE_CAB_MAX_ATTACHMENT_BYTES="157286400"
+
+Linux/WSL:
+
+    export PRE_CAB_MAX_ATTACHMENT_BYTES=157286400
+
+Files above the limit remain visible in the inventory and receive an extraction error rather than being silently discarded.
+
+PDF processing uses pypdf. Current pypdf releases expose resource limits intended to reduce excessive resource consumption from malformed documents.
+
+---
+
+# 10. Level 2 — evidence verification
+
+Evidence is not accepted merely because a keyword exists.
+
+The verifier asks:
+
+    1. Does a relevant document exist?
+    2. Does it identify the current CR?
+    3. Does it support the claimed purpose?
+    4. Is the status positive, negative or unclear?
+    5. Does it contradict another current signal?
+    6. Was the document actually readable?
+
+Evidence categories:
+
+- customer approval
+- UAT
+- test execution/results
+- QA signoff
+- lower-environment validation
+- rollback/recovery
+- implementation/runbook evidence
+
+---
+
+# 11. Evidence identity
+
+A strong evidence document should identify the current CR in its filename or content.
+
+Example:
+
+    CR:
+    CHG001234
+
+    File:
+    CHG001234_UAT_Report.pdf
+
+    Text:
+    CHG001234
+    UAT completed
+    Expected Result: PASS
+    Actual Result: PASS
+
+A generic document saying only "UAT passed" is not equivalent to CR-specific proof.
+
+---
+
+# 12. Testing model
+
+The system separates:
+
+    Test Plan
+       !=
+    Test Execution
+       !=
+    Formal Test Results Evidence
+
+A plan such as "test in UAT" does not prove execution.
+
+The execution parser was hardened to prefer the latest explicit status. This reduces false failures when a document contains historical text such as:
+
+    Previous test failed.
+    Remediation completed.
+    Current test passed.
+
+---
+
+# 13. Approval model
+
+Negative approval states are checked before positive terms.
+
+Examples:
+
+    not approved
+    rejected
+    declined
+    approval pending
+    awaiting approval
+
+This avoids accepting a document simply because it contains the word "approved".
+
+---
+
+# 14. Environment reasoning
+
+The workflow treats an unset Environment according to the existing PROD workflow rules.
+
+DEV, SIT, staging, UAT and Pre-PROD references are validation context.
+
+A document that proves only DEV testing cannot automatically prove production readiness.
+
+Example:
+
+    CR target = PROD
+    Evidence = DEV testing completed
+
+This is surfaced as a contradiction.
+
+---
+
+# 15. Rollback
+
+Rollback is evaluated independently from implementation.
+
+A credible recovery mechanism may include:
+
+    restore previous artifact
+    restore backup
+    revert deployment
+    restore previous release
+    revert configuration
+
+"Rollback if needed" is not equivalent to a concrete recovery mechanism.
+
+Attachment evidence may corroborate the CR rollback plan.
+
+Historical documents do not prove the current CR rollback.
+
+---
+
+# 16. Unreadable evidence
+
+The system explicitly surfaces:
+
+    EVIDENCE_UNREADABLE
+    EVIDENCE_VISION_REVIEW_REQUIRED
+
+Examples:
+
+- scanned PDF
+- screenshot
+- image-only document
+- encrypted/unreadable document
+- parser failure
+- oversized file
+
+The system does not silently interpret unreadable evidence as proof.
+
+---
+
+# 17. Level 3 — neural reasoning
+
+The neural engine receives:
+
+- current CR
+- Level-1 findings
+- specialist observations
+- Level-2 evidence state
+- ranked evidence excerpts
+- semantic historical memory
+- contradictions
+- uncertainties
+- applicable requirements
+
+Reasoning is structured as:
+
+    FACTS
+      |
+      v
+    INFERENCES
+      |
+      v
+    UNCERTAINTIES
+      |
+      v
+    CONTRADICTIONS
+      |
+      v
+    RECOMMENDATIONS
+      |
+      v
+    DECISION
+
+The model is explicitly constrained not to invent current evidence.
+
+---
+
+# 18. Self-critique
+
+The reasoning loop challenges itself with questions such as:
+
+- What evidence would make the conclusion wrong?
+- Which claims are unverified?
+- Did one keyword determine impact?
+- Was UAT incorrectly treated as universal?
+- Was test planning confused with execution?
+- Is there a current evidence contradiction?
+- Was historical memory mistaken for current proof?
+- Is rollback actually credible?
+
+The critique can make the result more conservative.
+
+It cannot erase deterministic blockers.
+
+---
+
+# 19. NLG architecture
+
+Reasoning and language realization are separate:
+
+    semantic reasoning
+           |
+           v
+    locked decision/facts
+           |
+           v
+    NLG realization
+           |
+           +--> CAB narrative
+           |
+           +--> technical narrative
+
+NLG cannot change:
+
+- decision
+- confidence
+- facts
+- evidence status
+- uncertainty
+
+It only improves presentation.
+
+The NLG contract also suppresses repetitive AI filler and separates CAB language from engineering language.
+
+---
+
+# 20. Final decision gate
+
+Decision order is conservative:
+
+    PASS
+      |
+      v
+    CONDITIONAL
+      |
+      v
+    NOT_READY
+
+Examples:
+
+    Stage 1 = NOT_READY
+    Stage 2 = PASS
+    Final   = NOT_READY
+
+    Stage 1 = PASS
+    Stage 2 = NOT_READY
+    Final   = NOT_READY
+
+The neural layer may discover additional risk and downgrade readiness.
+
+It cannot convert a deterministic or evidence blocker into PASS.
+
+---
+
+# 21. Persistent semantic memory
+
+The previous memory system relied primarily on SQLite/FTS retrieval.
+
+The upgraded architecture is:
+
+    memory record
+        |
+        +------------------+
+        |                  |
+        v                  v
+    SQLite row        local embedding
+                           |
+                           v
+                    persistent vector
+                           |
+                           v
+                    semantic retrieval
+                           |
+          +----------------+----------------+
+          |                |                |
+          v                v                v
+       semantic         lexical         identifiers
+       similarity        overlap           / CI
+          |                |                |
+          +----------------+----------------+
+                           |
+                     authority/recency
+                           |
+                           v
+                         MMR
+                           |
+                           v
+                    reasoning context
+
+Semantic retrieval is primary while identifiers, authority, confidence and recency remain important governance signals.
+
+---
+
+# 22. Memory consolidation
+
+Repeated episodes can become compact non-authoritative patterns:
+
+    episode
+    episode
+    episode
+       |
+       v
+    semantic clustering
+       |
+       v
+    consolidated pattern
+
+Consolidated memories are marked:
+
+    authoritative = false
+    current_cr_evidence = false
+
+Therefore historical learning cannot silently become current approval evidence.
+
+---
+
+# 23. Feedback learning
+
+Reviewer feedback stores:
+
+- predicted decision
+- actual decision
+- reviewer notes
+- corrected requirements
+- lessons
+
+Memory utility receives positive or negative reinforcement.
+
+This changes retrieval/learning metadata, not the original evidence.
+
+---
+
+# 24. Audit
+
+Each run records:
+
+- CR number
+- strictness
+- Stage-1 decision
+- Stage-2 decision
+- final decision
+- model
+- evidence manifest
+- reasoning
+- findings
+- audit run ID
+
+---
+
+# 25. Scratch installation — Windows
+
+Install Python 3.11+ and Git.
+
+Verify:
+
+    python --version
+    git --version
+
+Clone:
+
+    git clone https://github.com/AryanGupta-234/Demo.git
+    cd Demo
+
+Create environment:
+
+    python -m venv .venv
+
+Activate:
+
+    .\.venv\Scripts\Activate.ps1
+
+If PowerShell blocks activation:
+
+    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+
+Upgrade tooling:
+
+    python -m pip install --upgrade pip setuptools wheel
+
+Install everything:
+
+    pip install -r requirements.txt
+
+Equivalent:
+
+    pip install -e ".[all]"
+
+---
+
+# 26. Scratch installation — Linux / WSL
+
+Ubuntu:
+
+    sudo apt update
+    sudo apt install -y python3 python3-venv python3-pip git
+
+Clone:
+
+    git clone https://github.com/AryanGupta-234/Demo.git
+    cd Demo
+
+Environment:
+
+    python3 -m venv .venv
+    source .venv/bin/activate
+
+Install:
+
+    python -m pip install --upgrade pip setuptools wheel
+    pip install -r requirements.txt
+
+---
+
+# 27. Selective installation
+
+Core only:
+
+    pip install -e .
+
+Documents:
+
+    pip install -e ".[docs]"
+
+Embeddings:
+
+    pip install -e ".[embeddings]"
+
+API:
+
+    pip install -e ".[api]"
+
+Everything:
+
+    pip install -e ".[all]"
+
+The docs extra currently covers PDF, XLSX/XLSM, DOCX and PPTX extraction.
+
+---
+
+# 28. Installation verification
+
+Run:
+
+    python -m compileall src scripts main.py
+    python -m pytest
+
+Then:
+
+    python scripts/diagnose.py ./data/cr_export.json --evidence-root ./data/evidence
+
+---
+
+# 29. Offline diagnostic
+
+The diagnostic tool checks:
+
+- Python/runtime
+- document dependencies
+- embedding dependency
+- CR normalization
+- Level-1 decision
+- blocking findings
+- field requirements
+- evidence workspace
+- complete file inventory
+- supported/unsupported files
+- extraction failures
+
+Run:
+
+    python scripts/diagnose.py ./data/cr_export.json \
+      --evidence-root ./data/evidence
+
+Machine-readable:
+
+    python scripts/diagnose.py ./data/cr_export.json \
+      --evidence-root ./data/evidence \
+      --json
+
+---
+
+# 30. Local Ollama
+
+The local provider defaults to:
+
+    http://localhost:11434
+
+Verify Ollama:
+
+    ollama list
+
+Pull/configure the model used by the environment.
+
+Example:
+
+    ollama pull qwen2.5:7b-instruct
+
+Run server if needed:
+
+    ollama serve
+
+Run the validator:
+
+    python main.py ./data/one_cr.json --provider ollama
+
+Optional:
+
+    OLLAMA_MODEL
+    OLLAMA_BASE_URL
+    OLLAMA_NUM_CTX
+
+Windows PowerShell example:
+
+    $env:OLLAMA_MODEL="qwen2.5:7b-instruct"
+    $env:OLLAMA_BASE_URL="http://localhost:11434"
+    $env:OLLAMA_NUM_CTX="32768"
+
+---
+
+# 31. Ollama model compatibility
+
+Ollama is treated as a runtime/provider boundary, not as a Qwen-only implementation.
+
+The provider accepts the model name from `OLLAMA_MODEL`, so the same Pre-CAB pipeline can use different Ollama models without changing the validation, evidence, memory, or final-gate code.
+
+Example:
+
+    $env:OLLAMA_MODEL="qwen2.5:7b-instruct"
+    python main.py ./data/one_cr.json --provider ollama
+
+Switching models:
+
+    $env:OLLAMA_MODEL="llama3.1:8b"
+    python main.py ./data/one_cr.json --provider ollama
+
+A fine-tuned/custom Ollama model can be selected the same way:
+
+    $env:OLLAMA_MODEL="pre-cab-qwen"
+    python main.py ./data/one_cr.json --provider ollama
+
+Compatibility depends on the capabilities of the selected model. The model should be suitable for the provider's chat/structured-output contract and have enough context for the configured workload. Context length, tool/function calling, JSON reliability and reasoning quality can vary by model.
+
+Important separation:
+
+    Ollama model
+        = neural reasoning / language realization
+
+    Deterministic validators + evidence gate
+        = authoritative safety/decision controls
+
+    Embedding model
+        = separate semantic-memory retrieval component
+
+Changing the Ollama generation model therefore does not change the deterministic Pre-CAB policy engine. A weaker or incompatible model may produce lower-quality reasoning, but it must not be able to override deterministic or evidence blockers.
+
+The repository's Qwen/QLoRA training path is an example model-specific training workflow; it is not a requirement of the Ollama provider itself.
+
+---
+
+# 31. Cloud provider
+
+Groq:
+
+    $env:GROQ_API_KEY="..."
+    python main.py .\data\one_cr.json --provider groq
+
+Linux:
+
+    export GROQ_API_KEY="..."
+    python main.py ./data/one_cr.json --provider groq
+
+Hugging Face:
+
+    export HF_TOKEN="..."
+    python main.py ./data/one_cr.json --provider huggingface
+
+Automatic provider routing:
+
+    python main.py ./data/one_cr.json --provider auto
+
+Never commit API keys.
+
+---
+
+# 32. Semantic memory configuration
+
+Defaults:
+
+    PRE_CAB_SEMANTIC_MEMORY=true
+    PRE_CAB_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+    PRE_CAB_SEMANTIC_WEIGHT=0.65
+
+Disable:
+
+    PRE_CAB_SEMANTIC_MEMORY=false
+
+Evidence size:
+
+    PRE_CAB_MAX_ATTACHMENT_BYTES=78643200
+
+NLG:
+
+    PRE_CAB_NLG_MODE=refine
+
+Cache:
+
+    PRE_CAB_MODEL_CACHE=1
+    PRE_CAB_MODEL_CACHE_PATH=.pre_cab/model_cache.sqlite3
+
+Budget guard:
+
+    PRE_CAB_BUDGET_GUARD=1
+
+---
+
+# 33. Single CR
+
+Basic:
+
+    python main.py ./data/one_cr.json --provider ollama
+
+Strict:
+
+    python main.py ./data/one_cr.json --strictness strict --provider ollama
+
+Explicit evidence root:
+
+    python main.py ./data/one_cr.json \
+      --attachment-root ./data/evidence \
+      --provider ollama
+
+---
+
+# 34. Batch
+
+    python scripts/run_batch.py ./data/cr_export.json \
+      --output artifacts/cr_results.jsonl
+
+Evidence-aware:
+
+    python scripts/run_batch.py ./data/cr_export.json \
+      --attachments ./data/evidence \
+      --output artifacts/cr_results.jsonl
+
+---
+
+# 35. Recommended directory
+
+    project/
+      data/
+        cr_export.json
+        evidence/
+          CHG001234/
+            approval.pdf
+            test-results.xlsx
+            implementation.docx
+            rollback.pptx
+            screenshot.png
+
+      .pre_cab/
+        memory.sqlite3
+        model_cache.sqlite3
+        audit.sqlite3
+
+      artifacts/
+        pre_cab/
+
+Keep production data outside Git.
+
+Recommended ignore entries:
+
+    .env
+    .pre_cab/
+    artifacts/
+    data/
+    real_data/
+    evidence/
+    attachments/
+    *.sqlite3
+
+---
+
+# 36. Current outputs
+
+For a CR:
+
+    artifacts/pre_cab/
+      CHG001234_pre_cab.json
+      CHG001234_pre_cab.txt
+      batch_results.json
+
+The JSON includes:
+
+- final decision
+- confidence
+- findings
+- evidence manifest
+- workspace inventory
+- extraction errors
+- agent state
+- reasoning
+- model information
+- audit ID
+
+---
+
+# 37. Demo vs real production integration
+
+The project deliberately keeps the **same core validator** behind both the demonstration path and the real ServiceNow path.
+
+| Area | Current demonstration | Real / production work |
+|---|---|---|
+| CR input | Local JSON fixture | ServiceNow REST CR retrieval |
+| Authentication | None required | ServiceNow credentials / approved auth mechanism |
+| Attachments | Local `evidence/<CR>/` folder | ServiceNow attachment API |
+| Document extraction | Local bounded extraction | Same extraction after API retrieval |
+| Level 1 validation | Real deterministic engine | Same |
+| Specialist agents | Real | Same |
+| Level 2 evidence verification | Real | Same |
+| Neural reasoning | Configurable local/cloud model | Same, subject to deployment/model policy |
+| Semantic memory | Local persistent store | Replaceable production persistence if required |
+| Audit | Local SQLite | Production audit store/integration if required |
+| ServiceNow writes | Not performed by read-only client | Explicitly implement/authorize separately if required |
+
+### Real ServiceNow path already present
+
+The read-only client performs bounded GET operations for:
+
+    ServiceNow change_request
+            |
+            +--> CR fields
+            |
+            +--> attachment metadata
+            |
+            +--> attachment bytes
+            |
+            v
+    EvidenceDocument records
+            |
+            v
+    run_pre_cab(...)
+
+It includes retry handling for transient transport/429/5xx failures, authentication failure handling, attachment size limits, and in-memory attachment extraction. Credentials are read from environment variables and are not written into reports.
+
+Run a real ServiceNow CR validation with:
+
+    $env:SERVICENOW_BASE_URL="https://your-instance.service-now.com"
+    $env:SERVICENOW_USERNAME="..."
+    $env:SERVICENOW_PASSWORD="..."
+    python scripts/validate_servicenow_change.py CHG001234 --provider ollama
+
+The script is intentionally **read-only**. It does not approve the CR or write status/work notes back to ServiceNow.
+
+### What still needs organization-specific production work
+
+- approved authentication method (Basic is implemented as a controlled reference client; OAuth/service account may be required by the organization)
+- exact ServiceNow instance/table/query configuration
+- attachment retention/download policy
+- production secret management
+- production logging/observability
+- rate limits and enterprise retry policy
+- production audit persistence
+- authorization and network controls
+- optional, separately reviewed ServiceNow write-back workflow
+- enterprise scheduling/orchestration
+
+The clean boundary is:
+
+    ServiceNow adapter
+          |
+          v
+    normalized CR + evidence
+          |
+          v
+    Pre-CAB core
+
+The core must not contain ServiceNow credentials or depend on ServiceNow-specific network behavior.
+
+---
+
+# 38. Failure containment
+
+Missing embedding model:
+
+    semantic retrieval unavailable
+          |
+          v
+    lexical compatibility fallback
+
+Missing LLM:
+
+    deterministic validation continues
+
+Broken document:
+
+    document remains inventoried
+          |
+          v
+    extraction error is surfaced
+
+Malformed model JSON:
+
+    bounded repair
+          |
+          v
+    if still invalid -> deterministic result retained
+
+Evidence blocker + model PASS:
+
+    evidence blocker wins
+          |
+          v
+    NOT_READY
+
+---
+
+# 39. Security rules
+
+Never commit:
+
+- production CR exports
+- customer approvals
+- screenshots
+- ServiceNow attachments
+- credentials
+- API keys
+- .env
+- .pre_cab databases
+- production artifacts
+
+Historical memory is context, not current evidence.
+
+---
+
+# 40. Test strategy
+
+Tests cover:
+
+- field validation
+- requirement resolution
+- evidence verification
+- CR identity matching
+- unreadable evidence
+- environment contradictions
+- clone/delta analysis
+- pipeline decision merging
+- neural downgrade protection
+- model caching
+- audit persistence
+- semantic memory persistence
+- feedback
+- blackboard consistency
+- evidence workspace behavior
+
+Run:
+
+    python -m pytest
+
+Also:
+
+    python -m compileall src scripts main.py
+
+---
+
+# 41. Recommended evaluation
+
+Do not measure only language quality.
+
+Measure:
+
+    false PASS rate
+    false NOT_READY rate
+    requirement precision/recall/F1
+    evidence verification accuracy
+    contradiction detection
+    clone quality
+    retrieval relevance
+    malformed model-response rate
+    reasoning calls
+    latency
+    memory quality
+
+Run layer ablations:
+
+    deterministic only
+    deterministic + agents
+    + evidence
+    + memory
+    + neural reasoning
+    + NLG
+
+This shows exactly which layer improves the system.
+
+---
+
+# 42. Next major upgrades
+
+1. Connect the existing upstream ServiceNow downloader to the CR workspace contract.
+2. Add OCR/vision for scanned PDFs and image attachments.
+3. Add page/cell/slide-level evidence provenance.
+4. Persist useful agent patterns without persisting current approval as policy.
+5. Add a fixed historical benchmark with leakage controls.
+6. Add automatic regression checks for false-PASS cases.
+7. Add workspace-level parallel document extraction with bounded concurrency.
+8. Add stronger document status parsing using structured tables where available.
+9. Add explicit evidence freshness/provenance metadata.
+10. Add a persistent cognitive blackboard layered above semantic memory.
+
+---
+
+# 43. Core engineering principle
+
+The goal is not:
+
+    "make the LLM decide everything"
+
+The goal is:
+
+    deterministic policy
+           +
+    specialist reasoning
+           +
+    current evidence
+           +
+    semantic historical memory
+           +
+    adversarial neural reasoning
+           +
+    controlled language realization
+           =
+    more intelligent but still auditable Pre-CAB validation
+
+The neural engine should become more semantic, contextual and adaptive without becoming less deterministic, traceable or reproducible.

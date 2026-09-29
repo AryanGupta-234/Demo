@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .memory import MemoryKind, MemoryRecord, UnifiedMemory
+from .memory_consolidation import reinforce_memory
 from .schemas import Decision
 
 
@@ -59,4 +60,10 @@ def remember_feedback(memory: UnifiedMemory, feedback: CABFeedback) -> MemoryRec
         metadata=feedback.to_dict(),
     )
     memory.remember(record)
+    reinforce_memory(
+        memory,
+        record,
+        correct=feedback.correct,
+        note=feedback.reviewer_notes or ("; ".join(feedback.lessons) if feedback.lessons else ""),
+    )
     return record

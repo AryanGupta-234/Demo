@@ -10,11 +10,13 @@ from typing import Any
 from pre_cab.audit_store import SQLiteAuditStore
 from pre_cab.env_loader import load_dotenv
 from pre_cab.local_attachments import SUPPORTED_SUFFIXES
+from pre_cab.embeddings import LocalSentenceTransformer
 from pre_cab.memory import remember_validation_episode
 from pre_cab.input_loader import load_cr_records, normalize_cr_record, record_type, source_id
 from pre_cab.narrative import format_agent_chains, format_cab_result
 from pre_cab.pipeline import run_pre_cab
-from pre_cab.persistent_memory import SQLiteUnifiedMemory
+from pre_cab.memory_consolidation import consolidate_memory
+from pre_cab.semantic_memory import SemanticSQLiteUnifiedMemory
 from pre_cab.reporting import build_report
 from pre_cab.runtime_provider import build_runtime_provider
 from pre_cab.schemas import Strictness
@@ -121,7 +123,18 @@ def main() -> int:
         auto_evidence_root = resolve_attachment_root(args.cr_json, source_id(records[0]), args.attachment_root)
         print(f"Evidence workspace root: {auto_evidence_root}")
 
-    memory = SQLiteUnifiedMemory(Path(".pre_cab") / "memory.sqlite3")
+    embedding_provider = None
+    if os.getenv("PRE_CAB_SEMANTIC_MEMORY", "true").lower() in {"1", "true", "yes", "on"}:
+        try:
+            embedding_provider = LocalSentenceTransformer(os.getenv("PRE_CAB_EMBEDDING_MODEL") or None)
+            print(f"Semantic memory: enabled ({embedding_provider.model_name})")
+        except Exception as exc:
+            print(f"Semantic memory unavailable: {type(exc).__name__}: {exc}; using lexical compatibility fallback.")
+    memory = SemanticSQLiteUnifiedMemory(
+        Path(".pre_cab") / "memory.sqlite3",
+        embedding_provider=embedding_provider,
+        semantic_weight=float(os.getenv("PRE_CAB_SEMANTIC_WEIGHT", "0.65")),
+    )
     audit = SQLiteAuditStore(Path(".pre_cab") / "audit.sqlite3")
     reports: list[dict[str, Any]] = []
 
@@ -167,7 +180,7 @@ def main() -> int:
                 or {}
             )
             brain_payload = result.stage1.metadata.get("brain") or {}
-            remember_validation_episode(
+            episode = remember_validation_episode(
                 memory,
                 canonical_cr,
                 decision=result.final_decision.value,
@@ -176,6 +189,11 @@ def main() -> int:
                 profile=profile,
                 reasoning_summary=str(brain_payload.get("cab_reasoning") or ""),
             )
+
+            if index % 10 == 0 or index == len(records):
+                consolidated = consolidate_memory(memory, max_records=96)
+                if consolidated:
+                    print(f"  Memory consolidation: {consolidated} pattern(s) created.")
 
             run_id = audit.record(
                 cr_number=number,

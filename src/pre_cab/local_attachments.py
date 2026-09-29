@@ -1,21 +1,32 @@
-"""Local attachment discovery for offline/private benchmark and production handoff runs.
+"""Safe local CR attachment discovery, inventory and extraction.
 
-The ServiceNow ingestion/file-management layer is intentionally outside this module. It is expected
- to create one directory per CR and place that CR's downloaded attachments inside it. This module
-consumes that prepared workspace without making ServiceNow calls or modifying the files.
-
-Files remain on the caller's machine. Supported text/tabular documents are extracted locally. Image
-attachments are retained as explicit unparsed evidence so the validator never silently ignores them.
+The upstream ingestion layer is expected to place files under <root>/<CR number>.
+This module never calls ServiceNow or follows evidence belonging to another CR.
+It inventories every file, while only extracting supported document formats.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 from pathlib import Path
 
 from .evidence import EvidenceDocument
 
-TEXT_SUFFIXES = {".pdf", ".xlsx", ".xlsm", ".txt", ".md", ".csv", ".eml", ".json"}
+TEXT_SUFFIXES = {
+    ".pdf", ".xlsx", ".xlsm", ".docx", ".pptx",
+    ".txt", ".md", ".csv", ".eml", ".json",
+}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 SUPPORTED_SUFFIXES = TEXT_SUFFIXES | IMAGE_SUFFIXES
+DEFAULT_MAX_FILE_BYTES = 75 * 1024 * 1024
+
+
+def _max_file_bytes() -> int:
+    raw = os.getenv("PRE_CAB_MAX_ATTACHMENT_BYTES", str(DEFAULT_MAX_FILE_BYTES))
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_MAX_FILE_BYTES
 
 
 def _read_pdf(path: Path) -> str:
@@ -43,45 +54,68 @@ def _read_xlsx(path: Path) -> str:
     return "\n".join(lines)
 
 
+def _read_docx(path: Path) -> str:
+    try:
+        from docx import Document
+    except ImportError as exc:
+        raise RuntimeError("Install the 'docs' extra to parse DOCX attachments") from exc
+    document = Document(str(path))
+    chunks = [p.text for p in document.paragraphs if p.text.strip()]
+    for table in document.tables:
+        chunks.append("[TABLE]")
+        for row in table.rows:
+            values = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if values:
+                chunks.append(" | ".join(values))
+    return "\n".join(chunks)
+
+
+def _read_pptx(path: Path) -> str:
+    try:
+        from pptx import Presentation
+    except ImportError as exc:
+        raise RuntimeError("Install the 'docs' extra to parse PPTX attachments") from exc
+    presentation = Presentation(str(path))
+    chunks: list[str] = []
+    for index, slide in enumerate(presentation.slides, 1):
+        chunks.append(f"[SLIDE {index}]")
+        for shape in slide.shapes:
+            text = getattr(shape, "text", "")
+            if text and text.strip():
+                chunks.append(text.strip())
+    return "\n".join(chunks)
+
+
 def extract_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix == ".pdf":
         return _read_pdf(path)
     if suffix in {".xlsx", ".xlsm"}:
         return _read_xlsx(path)
+    if suffix == ".docx":
+        return _read_docx(path)
+    if suffix == ".pptx":
+        return _read_pptx(path)
     if suffix in {".txt", ".md", ".csv", ".eml", ".json"}:
         return path.read_text(encoding="utf-8", errors="replace")
     return ""
 
 
 def _cr_directory(root: Path, cr_number: str) -> Path | None:
-    """Resolve the ingestion layer's canonical ``<root>/<CR number>`` directory.
-
-    The exact directory match is preferred so an attachment belonging to CR123 is never selected
-    merely because another path happens to contain the same string. A recursive fallback is kept
-    for compatibility with the earlier private benchmark layout where CR folders could be nested.
-    """
     needle = cr_number.strip()
     if not needle:
         return None
-
     direct = root / needle
     if direct.is_dir():
-        return direct
+        return direct.resolve()
 
     for candidate in root.rglob(needle):
         if candidate.is_dir() and candidate.name == needle:
-            return candidate
+            return candidate.resolve()
     return None
 
 
 def _root_attachments(root: Path, cr_number: str) -> list[Path]:
-    """Return legacy root-level files explicitly named for this CR.
-
-    The production contract is one folder per CR, but older callers/tests may place files directly
-    under the attachment root. Only names with the exact CR number followed by a separator are
-    accepted; unrelated sibling CR evidence is never guessed.
-    """
     needle = cr_number.strip()
     if not needle:
         return []
@@ -95,26 +129,58 @@ def _root_attachments(root: Path, cr_number: str) -> list[Path]:
     return sorted(matches)
 
 
-def discover_attachments(root: Path, cr_number: str) -> list[Path]:
-    """Find supported files in the CR-specific workspace directory.
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
 
-    The ingestion layer owns folder creation and file placement. This function only reads files
-    from the resolved CR directory and never guesses unrelated evidence from sibling CR folders.
-    For backward compatibility, explicitly CR-prefixed files directly under ``root`` are also
-    accepted when no canonical CR directory exists.
-    """
+
+def discover_attachments(root: Path, cr_number: str) -> list[Path]:
+    """Find supported files strictly inside the CR workspace."""
     if not root.exists() or not root.is_dir():
         return []
 
     cr_dir = _cr_directory(root, cr_number)
     if cr_dir is not None:
-        return sorted(
-            path
-            for path in cr_dir.rglob("*")
-            if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES
-        )
+        files: list[Path] = []
+        for path in cr_dir.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
+                continue
+            # Avoid symlinks escaping the CR workspace.
+            if path.is_symlink() or not _inside(path, cr_dir):
+                continue
+            files.append(path)
+        return sorted(files)
 
     return _root_attachments(root, cr_number)
+
+
+def inventory_workspace(root: Path, cr_number: str) -> list[dict[str, object]]:
+    """Inventory every file in the CR workspace, including unsupported/unreadable files."""
+    cr_dir = _cr_directory(root, cr_number)
+    if cr_dir is None:
+        paths = _root_attachments(root, cr_number)
+    else:
+        paths = [p for p in cr_dir.rglob("*") if p.is_file() and not p.is_symlink() and _inside(p, cr_dir)]
+
+    inventory: list[dict[str, object]] = []
+    for path in sorted(paths):
+        try:
+            size = path.stat().st_size
+        except OSError as exc:
+            inventory.append({"name": path.name, "path": str(path), "status": "stat_error", "error": str(exc)})
+            continue
+        inventory.append({
+            "name": path.name,
+            "path": str(path),
+            "suffix": path.suffix.lower(),
+            "bytes": size,
+            "supported": path.suffix.lower() in SUPPORTED_SUFFIXES,
+            "status": "too_large" if size > _max_file_bytes() else ("supported" if path.suffix.lower() in SUPPORTED_SUFFIXES else "unsupported"),
+        })
+    return inventory
 
 
 def load_attachments_for_cr(root: Path, cr_number: str) -> list[EvidenceDocument]:
@@ -129,6 +195,9 @@ def load_attachments_for_cr(root: Path, cr_number: str) -> list[EvidenceDocument
         }
         if suffix in IMAGE_SUFFIXES:
             text = ""
+        elif metadata["bytes"] > _max_file_bytes():
+            text = ""
+            metadata["extraction_error"] = f"File exceeds PRE_CAB_MAX_ATTACHMENT_BYTES={_max_file_bytes()}."
         else:
             try:
                 text = extract_text(path)
