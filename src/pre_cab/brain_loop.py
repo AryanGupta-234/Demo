@@ -362,27 +362,47 @@ class AgenticReasoningLoop:
                 "recommendations": "specific next actions, not generic review language.",
             },
         }
+        payload["reasoning_sequence"] = [
+            "understand_change",
+            "determine_applicable_controls",
+            "map_current_evidence",
+            "separate_test_plan_execution_results",
+            "assess_implementation_and_rollback",
+            "reconcile_current_contradictions",
+            "compare_history_without_promoting_it",
+            "assess_readiness_and_uncertainty",
+            "write_audience_specific_explanations",
+        ]
+        payload["source_authority_order"] = [
+            "deterministic_validation_and_explicit_policy",
+            "current_cr_fields",
+            "current_cr_evidence_documents",
+            "same_cr_work_notes_and_comments",
+            "specialist_agent_observations",
+            "historical_or_learned_context",
+            "model_inferences",
+        ]
         payload["instruction"] = (
-            "Return ONLY one valid JSON object. Analyze the current CR first using the fixed schema, mapped requirements, "
-            "Work Notes, Comments, retrieved evidence and learned organization knowledge. The learned knowledge was derived "
-            "from historical CRs and is prior knowledge, not current-CR evidence. Historical labels were used only during the "
-            "learning pass and must not be copied to the current CR. Use all descriptive fields, including explicit missing/"
-            "present state. Interpret signoff fields by disposition (Yes, No, Not Applicable, Completed, etc.). Work Notes and "
-            "Comments are chronological journal evidence from this SAME CR. Never let a later journal entry silently overwrite "
-            "current structured fields. UAT is contextual. Rollback must be credible. Never invent approvals, testing, evidence, "
-            "history, or policy. Separate facts, inferences, uncertainties and contradictions and challenge false-PASS risk. "
-            "Treat SIT/UAT/Pre-PROD/lower-environment references as one non-PROD validation class, do not report an unset "
-            "Environment as missing in this PROD workflow, and keep missing CI as traceability unless explicitly gated. "
-            "Validate all 14 model-facing fields even when some are legitimately unset or Not Applicable. Classify the change before deciding "
-            "which evidence is mandatory. Use change_profile and evidence_matrix as deterministic context. Do not turn informational "
-            "governance gaps into readiness blockers. A historical CR reference proves only that an example exists, not that this CR "
-            "was tested. cab_reasoning and technical_reasoning serve two different readers and are shown to both together — write "
-            "cab_reasoning so a non-technical CAB member understands the decision and its business impact on its own, and "
-            "write technical_reasoning so an engineer gets the specific field-level evidence behind it; do not make one "
-            "depend on the other to be understood. Use varied natural language, avoid repeating the same sentence or conclusion, "
-            "lead each rationale with observed evidence, and never use empty phrases such as 'further review is recommended' "
-            "unless the response names exactly what must be reviewed."
+            "Analyze this CR as a senior change-governance and technical reviewer. Follow the supplied reasoning_sequence in order. "
+            "First establish what the change is, where it applies, what it affects, and which change archetype/profile fits. "
+            "Then determine which controls and evidence are actually applicable using change_profile, evidence_matrix, deterministic findings "
+            "and workflow_context; never treat every mapped field as universally mandatory. "
+            "Next build the current evidence picture and distinguish stated, planned, executed, verified and historical information. "
+            "For testing, keep Test plan, Test execution and formal Test Results Evidence separate. For recovery, look for a concrete "
+            "trigger, rollback procedure, restore mechanism and recovery validation. Reconcile contradictions across current CR fields, "
+            "same-CR notes/comments, evidence and agent observations. Use historical or learned context only for patterns and comparison; "
+            "delta-check it against the current CR and never copy a historical approval or prediction. "
+            "Keep hard blockers, material warnings, informational observations, uncertainties and model-derived hypotheses separate. "
+            "Never invent evidence, requirements, approvals, test results, dependencies, policy or outcomes. "
+            "When code, configuration, scripts, logs or repository references appear in supplied evidence, use them as technical artifacts "
+            "and distinguish static inspection from execution/deployment/testing evidence. "
+            "For every material conclusion use claim -> source -> corroboration -> implication -> uncertainty. "
+            "Return one JSON object only. Make facts observational, inferences derived, uncertainties unresolved, contradictions supported "
+            "by conflicting current signals, and recommendations concrete and actionable. "
+            "Write cab_reasoning for a non-technical CAB reader and technical_reasoning for an engineer; neither should depend on the other. "
+            "Avoid repeated conclusions and generic filler."
         )
+
         return payload
 
     @staticmethod
