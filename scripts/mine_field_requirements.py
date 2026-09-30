@@ -334,6 +334,18 @@ def main() -> None:
     parser.add_argument(
         "--out", default="config/field_requirements.generated.json", help="Output rule table path."
     )
+    parser.add_argument(
+        "--holdout", type=Path, default=None,
+        help="Separate historical JSON used for automatic lifecycle validation/promotion.",
+    )
+    parser.add_argument(
+        "--min-holdout-records", type=int, default=100,
+        help="Minimum Normal CRs required before automatic promotion can occur.",
+    )
+    parser.add_argument(
+        "--required-fill-floor", type=float, default=0.85,
+        help="Minimum holdout population rate for candidate REQUIRED rules.",
+    )
     args = parser.parse_args()
 
     with open(args.input, "r", encoding="utf-8-sig") as handle:
@@ -342,6 +354,19 @@ def main() -> None:
         raise SystemExit("Expected the input JSON to be a list of CR records.")
 
     table = mine(records)
+    if args.holdout is not None:
+        from pre_cab.rule_lifecycle import automatically_promote
+
+        with args.holdout.open("r", encoding="utf-8-sig") as handle:
+            holdout = json.load(handle)
+        if not isinstance(holdout, list):
+            raise SystemExit("Expected the holdout input JSON to be a list of CR records.")
+        table = automatically_promote(
+            table,
+            holdout,
+            min_holdout_records=args.min_holdout_records,
+            required_fill_floor=args.required_fill_floor,
+        )
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as handle:
@@ -351,7 +376,8 @@ def main() -> None:
         f"Mined {table['normal_record_count']} Normal CRs into "
         f"{len(table['buckets'])} category/sub-category rules "
         f"(+{len(table['categories'])} category-level fallback rules) "
-        f"and {len(table['work_note_signals'])} work-note risk-language signals -> {out_path}"
+        f"and {len(table['work_note_signals'])} work-note risk-language signals "
+        f"-> {out_path} | lifecycle={table.get('lifecycle_status', 'UNKNOWN')}"
     )
 
 
