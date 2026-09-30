@@ -11,11 +11,11 @@ dependencies = []
 
 [project.optional-dependencies]
 llm = ["openai>=1.55", "groq>=0.30"]
-docs = ["pypdf>=6.0", "openpyxl>=3.1", "python-docx>=1.1", "python-pptx>=1.0", "reportlab>=4.2"]
+docs = ["pypdf>=6.0", "openpyxl>=3.1", "python-docx>=1.1", "python-pptx>=1.0", "reportlab>=4.2", "pytesseract>=0.3.13", "Pillow>=10.4", "PyMuPDF>=1.24"]
 embeddings = ["sentence-transformers==5.2.3", "huggingface-hub==0.36.2"]
 api = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
 dev = ["pytest>=8.0", "mypy>=1.11", "types-openpyxl>=3.1"]
-all = ["openai>=1.55", "groq>=0.30", "pypdf>=6.0", "openpyxl>=3.1", "python-docx>=1.1", "python-pptx>=1.0", "reportlab>=4.2", "sentence-transformers==5.2.3", "huggingface-hub==0.36.2", "fastapi>=0.115", "uvicorn[standard]>=0.30", "types-openpyxl>=3.1"]
+all = ["openai>=1.55", "groq>=0.30", "pypdf>=6.0", "openpyxl>=3.1", "python-docx>=1.1", "python-pptx>=1.0", "reportlab>=4.2", "pytesseract>=0.3.13", "Pillow>=10.4", "PyMuPDF>=1.24", "sentence-transformers==5.2.3", "huggingface-hub==0.36.2", "fastapi>=0.115", "uvicorn[standard]>=0.30", "types-openpyxl>=3.1"]
 
 [tool.pytest.ini_options]
 pythonpath = [".", "src"]
@@ -31,5 +31,5 @@ select = ["E9", "F63", "F7", "F82"]
 where = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["sentence_transformers.*", "fastapi.*", "openpyxl.*", "pypdf.*", "groq.*", "openai.*"]
+module = ["sentence_transformers.*", "fastapi.*", "openpyxl.*", "pypdf.*", "groq.*", "openai.*", "pytesseract.*", "PIL.*", "fitz.*"]
 ignore_missing_imports = true
