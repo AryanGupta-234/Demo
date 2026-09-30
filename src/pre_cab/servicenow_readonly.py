@@ -141,20 +141,22 @@ class ReadOnlyServiceNowClient:
             "requires_vision": suffix in IMAGE_SUFFIXES,
         }
 
-        with NamedTemporaryFile(suffix=suffix or ".bin", delete=True) as handle:
-            handle.write(content)
-            handle.flush()
-            path = Path(handle.name)
+        temp_path: Path | None = None
+        try:
+            with NamedTemporaryFile(suffix=suffix or ".bin", delete=False) as handle:
+                handle.write(content)
+                handle.flush()
+                temp_path = Path(handle.name)
 
             if suffix in IMAGE_SUFFIXES:
-                text, derived = analyze_image_evidence(path)
+                text, derived = analyze_image_evidence(temp_path)
                 metadata.update(derived)
                 return text, metadata
 
-            text = extract_text(path)
+            text = extract_text(temp_path)
             if suffix == ".pdf":
                 try:
-                    ocr_text, ocr_meta = ocr_pdf(path)
+                    ocr_text, ocr_meta = ocr_pdf(temp_path)
                     metadata.update(ocr_meta)
                     if ocr_text:
                         text = f"{text}\n\n{ocr_text}".strip()
@@ -163,6 +165,12 @@ class ReadOnlyServiceNowClient:
                         raise
                     metadata["ocr_error"] = str(exc)
             return text, metadata
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
 
     def evidence_documents(self, change: dict[str, Any]) -> list[EvidenceDocument]:
         sys_id = str(change.get("sys_id") or "").strip()
