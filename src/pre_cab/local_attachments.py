@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 from .evidence import EvidenceDocument
+from .ocr import OCRUnavailable, analyze_image_evidence, ocr_pdf
 
 TEXT_SUFFIXES = {
     ".pdf", ".xlsx", ".xlsm", ".docx", ".pptx",
@@ -198,21 +199,44 @@ def load_attachments_for_cr(root: Path, cr_number: str) -> list[EvidenceDocument
             "local_path": str(path),
             "bytes": path.stat().st_size,
             "requires_vision": suffix in IMAGE_SUFFIXES,
+            "ocr_executed": False,
+            "vision_executed": False,
             "extraction_error": None,
         }
+
         if suffix in IMAGE_SUFFIXES:
-            text = ""
+            text, derived = analyze_image_evidence(path)
+            metadata.update(derived)
+            if not text:
+                metadata["extraction_error"] = (
+                    metadata.get("vision_error")
+                    or metadata.get("ocr_error")
+                    or "No OCR/vision text was produced."
+                )
         elif metadata["bytes"] > _max_file_bytes():
             text = ""
             metadata["extraction_error"] = f"File exceeds PRE_CAB_MAX_ATTACHMENT_BYTES={_max_file_bytes()}."
         else:
             try:
                 text = extract_text(path)
-                if not text.strip():
-                    metadata["extraction_error"] = "No extractable text found; document may be scanned/image-only or empty."
+                if suffix == ".pdf" and not text.strip():
+                    # A textless PDF is a likely scanned document. Render it locally and
+                    # execute OCR without replacing the original document evidence.
+                    ocr_text, ocr_meta = ocr_pdf(path)
+                    metadata.update(ocr_meta)
+                    if ocr_text:
+                        text = ocr_text
+                    else:
+                        metadata["extraction_error"] = "No extractable text found after PDF OCR."
+                elif not text.strip():
+                    metadata["extraction_error"] = "No extractable text found; document may be empty."
+            except OCRUnavailable as exc:
+                text = ""
+                metadata["extraction_error"] = str(exc)
             except (OSError, RuntimeError, ValueError) as exc:
                 text = ""
                 metadata["extraction_error"] = f"{type(exc).__name__}: {exc}"
+
         documents.append(
             EvidenceDocument(
                 ref=str(path),
@@ -223,3 +247,4 @@ def load_attachments_for_cr(root: Path, cr_number: str) -> list[EvidenceDocument
             )
         )
     return documents
+
