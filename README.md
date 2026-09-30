@@ -139,8 +139,10 @@ Use parallel execution when throughput matters, for example in a controlled batc
       +-- inventory EVERY file
       +-- identify supported/unsupported files
       +-- extract supported documents
+      +-- OCR textless/scanned pages
+      +-- optional Ollama vision analysis for images
       +-- record parser failures
-      +-- flag image/scanned evidence
+      +-- flag unresolved visual evidence
       |
       v
     LEVEL 2 — evidence verification
@@ -199,6 +201,8 @@ The important ordering is:
 | orchestrator.py | Agent orchestration and blackboard |
 | evidence_workspace.py | CR workspace resolution/classification |
 | local_attachments.py | File inventory and extraction |
+| ocr.py | Local OCR and optional Ollama vision execution |
+| rule_lifecycle.py | Holdout validation and automatic rule lifecycle promotion |
 | evidence.py | Evidence verification |
 | evidence_agents.py | Document-purpose specialists |
 | evidence_retrieval.py | Relevant evidence excerpt retrieval |
@@ -1030,7 +1034,7 @@ Everything:
 
     pip install -e ".[all]"
 
-The docs extra currently covers PDF, XLSX/XLSM, DOCX and PPTX extraction.
+The docs extra covers PDF, XLSX/XLSM, DOCX, PPTX extraction plus the Python OCR bindings. The local Tesseract executable is a separate system dependency.
 
 ---
 
