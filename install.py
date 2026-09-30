@@ -136,6 +136,8 @@ def main() -> int:
     print("- --full installs semantic embeddings, LLM/API clients, and development/test dependencies.")
     print("- Ollama is an external application and is not installed by pip.")
     print("- The embedding model is downloaded on first use when semantic memory is enabled.")
+    print("- OCR Python packages are installed automatically; Tesseract itself must be installed on the machine (or set TESSERACT_CMD).")
+    print("- Set PRE_CAB_VISION_MODEL to a local Ollama vision-capable model to enable image vision analysis.")
     print("- API credentials are not created or stored by this installer.")
     print("- Ruff is optional developer tooling and is not required for installation or tests.")
     print("- Manager demo data and generated evidence are synthetic and contain no production data.")
