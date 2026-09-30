@@ -219,17 +219,21 @@ def load_attachments_for_cr(root: Path, cr_number: str) -> list[EvidenceDocument
         else:
             try:
                 text = extract_text(path)
-                if suffix == ".pdf" and not text.strip():
-                    # A textless PDF is a likely scanned document. Render it locally and
-                    # execute OCR without replacing the original document evidence.
-                    ocr_text, ocr_meta = ocr_pdf(path)
-                    metadata.update(ocr_meta)
-                    if ocr_text:
-                        text = ocr_text
-                    else:
-                        metadata["extraction_error"] = "No extractable text found after PDF OCR."
-                elif not text.strip():
-                    metadata["extraction_error"] = "No extractable text found; document may be empty."
+                if suffix == ".pdf":
+                    # OCR only the pages that have no native text. This also handles
+                    # mixed PDFs containing both digital and scanned pages.
+                    try:
+                        ocr_text, ocr_meta = ocr_pdf(path)
+                        metadata.update(ocr_meta)
+                        if ocr_text:
+                            text = f"{text}\n\n{ocr_text}".strip()
+                    except OCRUnavailable as exc:
+                        if not text.strip():
+                            raise
+                        metadata["ocr_error"] = str(exc)
+
+                if not text.strip():
+                    metadata["extraction_error"] = "No extractable text found."
             except OCRUnavailable as exc:
                 text = ""
                 metadata["extraction_error"] = str(exc)
