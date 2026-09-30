@@ -71,3 +71,46 @@ def test_attachment_size_limit_rejects_oversized_response(monkeypatch):
 
     with pytest.raises(ValueError, match="size limit"):
         client.download_attachment("abc")
+
+
+
+def test_servicenow_image_attachment_uses_local_ocr(monkeypatch):
+    monkeypatch.setattr(
+        "pre_cab.servicenow_readonly.analyze_image_evidence",
+        lambda path: (
+            "CHG001 image OCR text",
+            {"ocr_executed": True, "ocr_engine": "fake", "requires_vision": True, "vision_executed": False},
+        ),
+    )
+    client = ReadOnlyServiceNowClient(
+        ServiceNowCredentials("https://example.service-now.com", "user", "secret"),
+        max_retries=0,
+    )
+
+    text, metadata = client._extract_attachment_text("CHG001_screenshot.png", b"image")
+    assert "CHG001 image OCR text" in text
+    assert metadata["ocr_executed"] is True
+    assert metadata["requires_vision"] is True
+
+
+def test_servicenow_scanned_pdf_runs_ocr_when_native_text_is_empty(monkeypatch):
+    monkeypatch.setattr(
+        "pre_cab.servicenow_readonly.extract_text",
+        lambda path: "",
+    )
+    monkeypatch.setattr(
+        "pre_cab.servicenow_readonly.ocr_pdf",
+        lambda path: (
+            "[OCR PAGE 1]\nCHG001 TEST RESULT PASS",
+            {"ocr_executed": True, "ocr_engine": "fake", "ocr_confidence": 0.91},
+        ),
+    )
+    client = ReadOnlyServiceNowClient(
+        ServiceNowCredentials("https://example.service-now.com", "user", "secret"),
+        max_retries=0,
+    )
+
+    text, metadata = client._extract_attachment_text("CHG001_scan.pdf", b"pdf")
+    assert "TEST RESULT PASS" in text
+    assert metadata["ocr_executed"] is True
+    assert metadata["ocr_confidence"] == 0.91
