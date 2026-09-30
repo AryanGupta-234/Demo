@@ -10,11 +10,10 @@ Usage:
     python scripts/mine_field_requirements.py private_data/converted.json \
         --out config/field_requirements.generated.json
 
-Output is a CANDIDATE-status rule table (see schemas in field_requirement_engine.py
-for the lifecycle: CANDIDATE -> VALIDATED -> ACTIVE -> DEPRECATED). Nothing here
-promotes itself to ACTIVE automatically -- that is a deliberate human/benchmark
-gate per the "never let the system automatically rewrite production rules
-without validation" constraint.
+Output is a CANDIDATE-status rule table by default. When --holdout is supplied,
+the mined table is automatically validated by rule_lifecycle.py and can be
+promoted to VALIDATED or ACTIVE only when the holdout gates pass. This is bounded
+data validation, not unrestricted self-modification.
 """
 from __future__ import annotations
 
