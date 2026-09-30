@@ -13,11 +13,14 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from tempfile import NamedTemporaryFile
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from .evidence import EvidenceDocument
+from .local_attachments import IMAGE_SUFFIXES, extract_text
+from .ocr import OCRUnavailable, analyze_image_evidence, ocr_pdf
 
 
 @dataclass(frozen=True)
@@ -129,30 +132,37 @@ class ReadOnlyServiceNowClient:
         return self._get_bytes(f"api/now/attachment/{quote(attachment_sys_id, safe='')}/file")
 
     @staticmethod
-    def _extract_attachment_text(name: str, content: bytes) -> str:
+    def _extract_attachment_text(name: str, content: bytes) -> tuple[str, dict[str, Any]]:
+        """Extract an attachment using the same local document/OCR stack as file ingestion."""
         suffix = Path(name).suffix.lower()
-        if suffix == ".pdf":
-            try:
-                from pypdf import PdfReader
-            except ImportError as exc:
-                raise RuntimeError("Install the 'docs' extra to parse PDF attachments") from exc
-            reader = PdfReader(io.BytesIO(content))
-            return "\n".join((page.extract_text() or "") for page in reader.pages)
-        if suffix in {".xlsx", ".xlsm"}:
-            try:
-                from openpyxl import load_workbook
-            except ImportError as exc:
-                raise RuntimeError("Install the 'docs' extra to parse XLSX attachments") from exc
-            workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-            lines: list[str] = []
-            for sheet in workbook.worksheets:
-                lines.append(f"[Sheet: {sheet.title}]")
-                for row in sheet.iter_rows(values_only=True):
-                    values = [str(value) for value in row if value not in (None, "")]
-                    if values:
-                        lines.append(" | ".join(values))
-            return "\n".join(lines)
-        return content.decode("utf-8", errors="replace")
+        metadata: dict[str, Any] = {
+            "ocr_executed": False,
+            "vision_executed": False,
+            "requires_vision": suffix in IMAGE_SUFFIXES,
+        }
+
+        with NamedTemporaryFile(suffix=suffix or ".bin", delete=True) as handle:
+            handle.write(content)
+            handle.flush()
+            path = Path(handle.name)
+
+            if suffix in IMAGE_SUFFIXES:
+                text, derived = analyze_image_evidence(path)
+                metadata.update(derived)
+                return text, metadata
+
+            text = extract_text(path)
+            if suffix == ".pdf":
+                try:
+                    ocr_text, ocr_meta = ocr_pdf(path)
+                    metadata.update(ocr_meta)
+                    if ocr_text:
+                        text = f"{text}\n\n{ocr_text}".strip()
+                except OCRUnavailable as exc:
+                    if not text.strip():
+                        raise
+                    metadata["ocr_error"] = str(exc)
+            return text, metadata
 
     def evidence_documents(self, change: dict[str, Any]) -> list[EvidenceDocument]:
         sys_id = str(change.get("sys_id") or "").strip()
@@ -166,7 +176,7 @@ class ReadOnlyServiceNowClient:
             name = str(attachment.get("file_name") or attachment_id)
             try:
                 content = self.download_attachment(attachment_id)
-                text = self._extract_attachment_text(name, content)
+                text, extraction_metadata = self._extract_attachment_text(name, content)
                 extraction_error = None
             except (OSError, RuntimeError, ValueError, HTTPError, URLError) as exc:
                 text = ""
@@ -182,6 +192,7 @@ class ReadOnlyServiceNowClient:
                         "size_bytes": attachment.get("size_bytes"),
                         "content_type": attachment.get("content_type"),
                         "extraction_error": extraction_error,
+                        **extraction_metadata,
                     },
                 )
             )
