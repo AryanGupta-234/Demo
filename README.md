@@ -69,6 +69,47 @@ The validator reads only the requested CR workspace. It never uses a sibling CR'
 
 ---
 
+
+## Canonical end-to-end command
+
+The primary local/demo entrypoint is:
+
+    python main.py "C:\Users\aassw\Downloads\test1.json" --provider ollama
+
+This is the canonical **single-command end-to-end path**. The command loads and normalizes the CR dataset, excludes Emergency changes by default, initializes the configured Ollama model, enables semantic memory when configured, and then runs the linked Pre-CAB pipeline for each in-scope CR:
+
+    CR input
+      -> normalization
+      -> Level 1 deterministic validation
+      -> specialist agents / blackboard
+      -> CR-scoped evidence workspace
+      -> file inventory + document extraction
+      -> Level 2 evidence verification
+      -> semantic memory retrieval
+      -> Level 3 neural reasoning
+      -> adversarial critique when applicable
+      -> final conservative decision gate
+      -> CAB + technical NLG
+      -> audit + episodic memory
+
+The command is intentionally **sequential at the CR level**. This keeps the default demo path simple, predictable and provider/budget friendly. It does not disable any validation layer.
+
+Emergency changes are excluded by default:
+
+    python main.py "C:\path\to\crs.json" --provider ollama --include-emergency
+
+The semantic embedding model may download from Hugging Face on first use when semantic memory is enabled. This is separate from the Ollama generation model.
+
+### Optional bounded parallel processing
+
+The repository also contains an alternate programmatic parallel executor:
+
+    src/pre_cab/parallel.py
+
+It uses a bounded worker pool and runs one complete `run_pre_cab()` pipeline per CR while preserving input order in the returned results. Each CR keeps its own evidence workspace, so parallel execution does not intentionally mix evidence across CRs.
+
+Use parallel execution when throughput matters, for example in a controlled batch/service worker. The canonical `python main.py ...` path remains the reference demo entrypoint.
+
 ## 1. Complete execution flow
 
     CR JSON
@@ -721,7 +762,18 @@ Each run records:
 
 ---
 
-# 25. Installation — two options
+
+# 25. Implementation status / boundaries
+
+| Capability | Status | Current implementation boundary |
+|---|---|---|
+| OCR / vision execution | ❌ **Not yet implemented** | Image/scanned evidence is detected, retained and flagged for visual/OCR review; the repository does not yet execute OCR/vision analysis. |
+| Automatic rule lifecycle promotion | ❌ **Deliberately not automatic** | Rule mining produces governed candidate rules. Promotion from CANDIDATE to VALIDATED/ACTIVE remains an explicit human/benchmark-controlled operation. |
+| README installer description | ✅ **Updated** | The documented default `python install.py` path now matches the actual lightweight manager-demo installer; `python install.py --full` installs the complete AI/API/development stack and runs tests. |
+
+These boundaries are intentional. They prevent the documentation from implying capabilities that are not currently executed by the code.
+
+# 26. Installation — two options
 
 There are two supported installation paths.
 
@@ -736,9 +788,9 @@ It automatically:
 1. checks that Python 3.11+ is available
 2. creates or reuses `.venv`
 3. upgrades pip/setuptools/wheel
-4. installs the complete `.[all,dev]` dependency set
+4. installs the dependencies for the selected mode
 5. compiles the source and scripts
-6. runs the test suite
+6. runs the manager demo in default mode, or the full pytest suite with `--full`
 7. prints the exact command to activate/run the environment
 
 #### Windows PowerShell
@@ -747,9 +799,15 @@ It automatically:
     cd Demo
     python install.py
 
+Default mode is intentionally lightweight and prepares the manager demo.
+
+For the complete AI/API/development installation and full tests:
+
+    python install.py --full
+
 If `python` is not available but `py` is:
 
-    py install.py
+    py install.py --full
 
 #### Linux / WSL
 
@@ -849,7 +907,7 @@ Example model:
 
 The installer also does not create ServiceNow credentials or API keys. Those remain environment/deployment configuration.
 
-# 27. Selective installation
+# 28. Selective installation
 
 Core only:
 
@@ -875,7 +933,7 @@ The docs extra currently covers PDF, XLSX/XLSM, DOCX and PPTX extraction.
 
 ---
 
-# 28. Installation verification
+# 29. Installation verification
 
 Run:
 
@@ -888,7 +946,7 @@ Then:
 
 ---
 
-# 29. Offline diagnostic
+# 30. Offline diagnostic
 
 The diagnostic tool checks:
 
@@ -917,7 +975,7 @@ Machine-readable:
 
 ---
 
-# 30. Local Ollama
+# 31. Local Ollama
 
 The local provider defaults to:
 
@@ -955,7 +1013,7 @@ Windows PowerShell example:
 
 ---
 
-# 31. Ollama model compatibility
+# 32. Ollama model compatibility
 
 Ollama is treated as a runtime/provider boundary, not as a Qwen-only implementation.
 
@@ -995,7 +1053,7 @@ The repository's Qwen/QLoRA training path is an example model-specific training 
 
 ---
 
-# 31. Cloud provider
+# 33. Cloud provider
 
 Groq:
 
@@ -1020,7 +1078,7 @@ Never commit API keys.
 
 ---
 
-# 32. Semantic memory configuration
+# 34. Semantic memory configuration
 
 Defaults:
 
@@ -1051,7 +1109,7 @@ Budget guard:
 
 ---
 
-# 33. Single CR
+# 35. Single CR
 
 Basic:
 
@@ -1069,7 +1127,7 @@ Explicit evidence root:
 
 ---
 
-# 34. Batch
+# 36. Batch
 
     python scripts/run_batch.py ./data/cr_export.json \
       --output artifacts/cr_results.jsonl
@@ -1082,7 +1140,7 @@ Evidence-aware:
 
 ---
 
-# 35. Recommended directory
+# 37. Recommended directory
 
     project/
       data/
@@ -1118,7 +1176,7 @@ Recommended ignore entries:
 
 ---
 
-# 36. Current outputs
+# 38. Current outputs
 
 For a CR:
 
@@ -1142,7 +1200,7 @@ The JSON includes:
 
 ---
 
-# 37. Demo vs real production integration
+# 39. Demo vs real production integration
 
 The project deliberately keeps the **same core validator** behind both the demonstration path and the real ServiceNow path.
 
@@ -1216,7 +1274,7 @@ The core must not contain ServiceNow credentials or depend on ServiceNow-specifi
 
 ---
 
-# 38. Failure containment
+# 40. Failure containment
 
 Missing embedding model:
 
@@ -1252,7 +1310,7 @@ Evidence blocker + model PASS:
 
 ---
 
-# 39. Security rules
+# 41. Security rules
 
 Never commit:
 
@@ -1270,7 +1328,7 @@ Historical memory is context, not current evidence.
 
 ---
 
-# 40. Test strategy
+# 42. Test strategy
 
 Tests cover:
 
@@ -1300,7 +1358,7 @@ Also:
 
 ---
 
-# 41. Recommended evaluation
+# 43. Recommended evaluation
 
 Do not measure only language quality.
 
@@ -1331,7 +1389,7 @@ This shows exactly which layer improves the system.
 
 ---
 
-# 42. Next major upgrades
+# 44. Next major upgrades
 
 1. Connect the existing upstream ServiceNow downloader to the CR workspace contract.
 2. Add OCR/vision for scanned PDFs and image attachments.
@@ -1346,7 +1404,7 @@ This shows exactly which layer improves the system.
 
 ---
 
-# 43. Core engineering principle
+# 45. Core engineering principle
 
 The goal is not:
 
