@@ -533,6 +533,60 @@ Historical documents do not prove the current CR rollback.
 
 ---
 
+# 16. OCR / vision execution
+
+Image and scanned-document processing is now executable locally.
+
+For raster images:
+    
+    image
+      |
+      +--> Tesseract OCR
+      |
+      +--> optional Ollama vision model
+      |
+      v
+    derived text / visual description
+      |
+      v
+    evidence reasoning context
+
+For textless or mixed PDFs:
+
+    PDF
+      |
+      v
+    native PDF text extraction
+      |
+      +--> textless pages rendered with PyMuPDF
+                   |
+                   v
+              Tesseract OCR
+                   |
+                   v
+             combined evidence text
+
+OCR metadata is recorded in the evidence manifest, including whether OCR ran,
+the engine, confidence where available, page count, and OCR errors.
+
+Install the Python OCR dependencies through the normal documentation/full
+installation. The Tesseract executable itself is a local system dependency.
+
+Windows can use the standard Tesseract installation path or:
+
+    $env:TESSERACT_CMD="C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+Optional Ollama vision:
+
+    $env:PRE_CAB_VISION_MODEL="your-local-vision-capable-model"
+
+Vision output is explicitly marked as derived analysis and is not treated as
+direct evidence. This prevents a model-generated visual description from being
+silently promoted to a verified fact.
+
+
+---
+
 # 16. Unreadable evidence
 
 The system explicitly surfaces:
@@ -767,11 +821,58 @@ Each run records:
 
 | Capability | Status | Current implementation boundary |
 |---|---|---|
-| OCR / vision execution | ❌ **Not yet implemented** | Image/scanned evidence is detected, retained and flagged for visual/OCR review; the repository does not yet execute OCR/vision analysis. |
-| Automatic rule lifecycle promotion | ❌ **Deliberately not automatic** | Rule mining produces governed candidate rules. Promotion from CANDIDATE to VALIDATED/ACTIVE remains an explicit human/benchmark-controlled operation. |
+| OCR / vision execution | ✅ **Implemented (local)** | Raster images are OCR-processed with Tesseract; textless/mixed PDFs are rendered with PyMuPDF and OCR-processed. An optional Ollama vision model can additionally inspect raster evidence and its output is marked as derived, not direct evidence. |
+| Automatic rule lifecycle promotion | ✅ **Implemented with validation gates** | Candidate rules can be automatically evaluated against a separate Normal-CR holdout set and promoted to VALIDATED or ACTIVE only when objective stability thresholds pass. |
 | README installer description | ✅ **Updated** | The documented default `python install.py` path now matches the actual lightweight manager-demo installer; `python install.py --full` installs the complete AI/API/development stack and runs tests. |
 
 These boundaries are intentional. They prevent the documentation from implying capabilities that are not currently executed by the code.
+
+# 26. Automatic rule lifecycle promotion
+
+Rule mining remains data-driven, but candidate rules can now be automatically
+validated and promoted against a separate holdout dataset.
+
+Recommended flow:
+
+    historical training CRs
+             |
+             v
+    mine_field_requirements.py
+             |
+             v
+          CANDIDATE
+             |
+             v
+       holdout validation
+             |
+       +-----+------+
+       |            |
+       v            v
+    VALIDATED      ACTIVE
+                 (only when the stricter gate passes)
+
+The validation checks requirement-class stability between the mined candidate
+table and a separate Normal-CR holdout set. It also prevents ACTIVE promotion
+when candidate REQUIRED rules fall below the configured holdout population floor.
+
+One-step mine + automatic promotion:
+
+    python scripts/mine_field_requirements.py historical_train.json ^
+      --holdout historical_holdout.json ^
+      --out config/field_requirements.generated.json
+
+Or validate an existing candidate:
+
+    python scripts/promote_field_requirements.py ^
+      config/field_requirements.generated.json ^
+      historical_holdout.json ^
+      --out config/field_requirements.generated.json
+
+The promotion output records the validation method, thresholds, stability rate,
+required-rule regressions, and lifecycle history in the rule-table JSON.
+
+This is automatic promotion **after explicit data validation**; it is not an
+unbounded self-modifying policy mechanism.
 
 # 26. Installation — two options
 
@@ -907,7 +1008,7 @@ Example model:
 
 The installer also does not create ServiceNow credentials or API keys. Those remain environment/deployment configuration.
 
-# 28. Selective installation
+# 29. Selective installation
 
 Core only:
 
@@ -933,7 +1034,7 @@ The docs extra currently covers PDF, XLSX/XLSM, DOCX and PPTX extraction.
 
 ---
 
-# 29. Installation verification
+# 30. Installation verification
 
 Run:
 
@@ -946,7 +1047,7 @@ Then:
 
 ---
 
-# 30. Offline diagnostic
+# 31. Offline diagnostic
 
 The diagnostic tool checks:
 
@@ -975,7 +1076,7 @@ Machine-readable:
 
 ---
 
-# 31. Local Ollama
+# 32. Local Ollama
 
 The local provider defaults to:
 
@@ -1013,7 +1114,7 @@ Windows PowerShell example:
 
 ---
 
-# 32. Ollama model compatibility
+# 33. Ollama model compatibility
 
 Ollama is treated as a runtime/provider boundary, not as a Qwen-only implementation.
 
@@ -1053,7 +1154,7 @@ The repository's Qwen/QLoRA training path is an example model-specific training 
 
 ---
 
-# 33. Cloud provider
+# 34. Cloud provider
 
 Groq:
 
@@ -1078,7 +1179,7 @@ Never commit API keys.
 
 ---
 
-# 34. Semantic memory configuration
+# 35. Semantic memory configuration
 
 Defaults:
 
@@ -1109,7 +1210,7 @@ Budget guard:
 
 ---
 
-# 35. Single CR
+# 36. Single CR
 
 Basic:
 
@@ -1127,7 +1228,7 @@ Explicit evidence root:
 
 ---
 
-# 36. Batch
+# 37. Batch
 
     python scripts/run_batch.py ./data/cr_export.json \
       --output artifacts/cr_results.jsonl
@@ -1140,7 +1241,7 @@ Evidence-aware:
 
 ---
 
-# 37. Recommended directory
+# 38. Recommended directory
 
     project/
       data/
@@ -1176,7 +1277,7 @@ Recommended ignore entries:
 
 ---
 
-# 38. Current outputs
+# 39. Current outputs
 
 For a CR:
 
@@ -1200,7 +1301,7 @@ The JSON includes:
 
 ---
 
-# 39. Demo vs real production integration
+# 40. Demo vs real production integration
 
 The project deliberately keeps the **same core validator** behind both the demonstration path and the real ServiceNow path.
 
@@ -1274,7 +1375,7 @@ The core must not contain ServiceNow credentials or depend on ServiceNow-specifi
 
 ---
 
-# 40. Failure containment
+# 41. Failure containment
 
 Missing embedding model:
 
@@ -1310,7 +1411,7 @@ Evidence blocker + model PASS:
 
 ---
 
-# 41. Security rules
+# 42. Security rules
 
 Never commit:
 
@@ -1328,7 +1429,7 @@ Historical memory is context, not current evidence.
 
 ---
 
-# 42. Test strategy
+# 43. Test strategy
 
 Tests cover:
 
@@ -1358,7 +1459,7 @@ Also:
 
 ---
 
-# 43. Recommended evaluation
+# 44. Recommended evaluation
 
 Do not measure only language quality.
 
@@ -1389,22 +1490,21 @@ This shows exactly which layer improves the system.
 
 ---
 
-# 44. Next major upgrades
+# 45. Next major upgrades
 
 1. Connect the existing upstream ServiceNow downloader to the CR workspace contract.
-2. Add OCR/vision for scanned PDFs and image attachments.
 3. Add page/cell/slide-level evidence provenance.
 4. Persist useful agent patterns without persisting current approval as policy.
-5. Add a fixed historical benchmark with leakage controls.
-6. Add automatic regression checks for false-PASS cases.
-7. Add workspace-level parallel document extraction with bounded concurrency.
-8. Add stronger document status parsing using structured tables where available.
-9. Add explicit evidence freshness/provenance metadata.
-10. Add a persistent cognitive blackboard layered above semantic memory.
+4. Add a fixed historical benchmark with leakage controls.
+5. Add automatic regression checks for false-PASS cases.
+6. Add workspace-level parallel document extraction with bounded concurrency.
+7. Add stronger document status parsing using structured tables where available.
+8. Add explicit evidence freshness/provenance metadata.
+9. Add a persistent cognitive blackboard layered above semantic memory.
 
 ---
 
-# 45. Core engineering principle
+# 46. Core engineering principle
 
 The goal is not:
 
