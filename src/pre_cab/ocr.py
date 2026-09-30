@@ -235,6 +235,7 @@ def analyze_image_evidence(path: Path) -> tuple[str, dict[str, Any]]:
         sections.append("[OCR EXTRACTED TEXT]\n" + ocr_text)
     if vision_text:
         sections.append("[VISION DERIVED DESCRIPTION — NOT DIRECT EVIDENCE]\n" + vision_text)
+        metadata["vision_analysis"] = vision_text
     combined = "\n\n".join(sections).strip()
     metadata["derived_text_chars"] = len(combined)
     return combined, metadata
