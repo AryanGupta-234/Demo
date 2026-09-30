@@ -58,6 +58,13 @@ def _evidence_manifest(
                 ),
                 "extraction_error": d.metadata.get("extraction_error"),
                 "requires_vision": bool(d.metadata.get("requires_vision")),
+                "ocr_executed": bool(d.metadata.get("ocr_executed")),
+                "ocr_engine": d.metadata.get("ocr_engine"),
+                "ocr_confidence": d.metadata.get("ocr_confidence"),
+                "vision_executed": bool(d.metadata.get("vision_executed")),
+                "vision_model": d.metadata.get("vision_model"),
+                "vision_error": d.metadata.get("vision_error"),
+                "ocr_error": d.metadata.get("ocr_error"),
                 "text_chars": len(d.text),
             }
             for d in documents

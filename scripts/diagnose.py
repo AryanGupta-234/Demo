@@ -45,6 +45,9 @@ def diagnose(cr_path: Path, *, evidence_root: Path | None, strictness: Strictnes
             "semantic_memory": os.getenv("PRE_CAB_SEMANTIC_MEMORY", "true"),
             "embedding_model": os.getenv("PRE_CAB_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
             "max_attachment_bytes": os.getenv("PRE_CAB_MAX_ATTACHMENT_BYTES", "78643200"),
+            "vision_model": os.getenv("PRE_CAB_VISION_MODEL") or None,
+            "tesseract_cmd": os.getenv("TESSERACT_CMD") or None,
+            "ocr_max_pdf_pages": os.getenv("PRE_CAB_OCR_MAX_PDF_PAGES", "20"),
         },
         "dependencies": [
             _check_package("pypdf"),
@@ -52,6 +55,9 @@ def diagnose(cr_path: Path, *, evidence_root: Path | None, strictness: Strictnes
             _check_package("docx"),
             _check_package("pptx"),
             _check_package("sentence_transformers"),
+            _check_package("pytesseract"),
+            _check_package("PIL"),
+            _check_package("fitz"),
         ],
         "cr": {
             "number": number,
@@ -132,7 +138,11 @@ def main() -> int:
     if missing:
         print("Missing optional packages:", ", ".join(d["name"] for d in missing))
     else:
-        print("Document/embedding dependencies: OK")
+        print("Document/embedding/OCR Python dependencies: OK")
+    if report["configuration"]["vision_model"]:
+        print(f"Ollama vision model configured: {report['configuration']['vision_model']}")
+    else:
+        print("Ollama vision model: not configured (OCR remains available when Tesseract is installed).")
     return 0
 
 

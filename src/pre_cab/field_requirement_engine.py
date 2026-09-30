@@ -10,7 +10,7 @@ the gap is visible rather than silently guessed at.
 
 Rule lifecycle (see spec: candidate rule lifecycle):
     CANDIDATE -> VALIDATED -> ACTIVE -> DEPRECATED
-The miner only ever produces CANDIDATE tables. Promoting a table to ACTIVE is
+The miner produces CANDIDATE tables by default. Promoting a table to ACTIVE is
 a deliberate operational step (e.g. after benchmarking it against held-out
 historical outcomes) -- this module will happily load and apply a table at any
 lifecycle stage, but callers should not treat CANDIDATE output as policy truth

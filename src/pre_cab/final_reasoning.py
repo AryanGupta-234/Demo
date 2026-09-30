@@ -76,6 +76,22 @@ def _evidence_context(
             }
             for c in chunks
         ],
+        "visual_processing": [
+            {
+                "document_ref": d.ref,
+                "document_name": d.name,
+                "ocr_executed": bool(d.metadata.get("ocr_executed")),
+                "ocr_engine": d.metadata.get("ocr_engine"),
+                "ocr_confidence": d.metadata.get("ocr_confidence"),
+                "vision_executed": bool(d.metadata.get("vision_executed")),
+                "vision_model": d.metadata.get("vision_model"),
+                "vision_analysis": d.metadata.get("vision_analysis"),
+                "ocr_error": d.metadata.get("ocr_error"),
+                "vision_error": d.metadata.get("vision_error"),
+            }
+            for d in (documents or [])
+            if d.metadata.get("requires_vision")
+        ],
     }]
 
 
